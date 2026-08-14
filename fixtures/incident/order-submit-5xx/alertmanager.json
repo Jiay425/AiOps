@@ -1,0 +1,22 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HighHttp5xxRate",
+        "service": "order-service",
+        "severity": "critical",
+        "endpoint": "POST /orders/submit",
+        "env": "prod"
+      },
+      "annotations": {
+        "summary": "order-service POST /orders/submit 5xx rate is above 8% for 5 minutes",
+        "description": "Recent 5xx responses are concentrated on order submit requests. Trace samples point to OrderSubmitService.submit."
+      },
+      "startsAt": "2026-05-25T10:12:00+08:00",
+      "fingerprint": "order-submit-5xx-npe"
+    }
+  ]
+}

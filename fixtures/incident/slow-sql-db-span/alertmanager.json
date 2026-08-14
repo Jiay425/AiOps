@@ -1,0 +1,22 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "OrderServiceSlowDbSpan",
+        "service": "order-service",
+        "severity": "warning",
+        "endpoint": "GET /api/orders/dependency-latency",
+        "repository": "samples/order-service"
+      },
+      "annotations": {
+        "summary": "DB span latency dominates endpoint latency",
+        "description": "SkyWalking DB span SELECT product_sku takes more than 3000ms and slow query log appears."
+      },
+      "startsAt": "2026-06-24T10:20:00+08:00",
+      "fingerprint": "slow-sql-db-span"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "service": "order-service",
+  "timeWindow": "2026-05-27T14:25:00+08:00/2026-05-27T14:30:00+08:00",
+  "metrics": [
+    {
+      "name": "order_create_5xx_rate",
+      "query": "sum(rate(http_server_requests_seconds_count{service=\"order-service\",uri=\"/api/orders/create\",status=~\"5..\"}[5m]))",
+      "value": 0.082,
+      "unit": "ratio"
+    },
+    {
+      "name": "order_create_success_rate",
+      "query": "sum(rate(http_server_requests_seconds_count{service=\"order-service\",uri=\"/api/orders/create\",status=~\"2..\"}[5m]))",
+      "value": 0.15,
+      "unit": "ratio"
+    },
+    {
+      "name": "jvm_threads_blocked",
+      "query": "jvm_threads_state{service=\"order-service\",state=\"BLOCKED\"}",
+      "value": 4,
+      "unit": "threads"
+    },
+    {
+      "name": "order_create_request_count",
+      "query": "sum(rate(http_server_requests_seconds_count{service=\"order-service\",uri=\"/api/orders/create\"}[5m]))",
+      "value": 2.3,
+      "unit": "req/s"
+    }
+  ]
+}

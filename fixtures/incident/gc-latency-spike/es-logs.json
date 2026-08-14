@@ -1,0 +1,48 @@
+{
+  "service": "order-service",
+  "index": "prod-order-service-2026.05.27",
+  "logs": [
+    {
+      "timestamp": "2026-05-27T14:52:03+08:00",
+      "level": "WARN",
+      "traceId": "trace-gc-slow-001",
+      "requestId": "req-gc-77101",
+      "message": "G1 Young Generation GC pause exceeded 200ms threshold. Pause time: 287ms, Heap before GC: 1.82GB, Heap after GC: 0.91GB, Allocation rate: 420MB/s"
+    },
+    {
+      "timestamp": "2026-05-27T14:53:15+08:00",
+      "level": "WARN",
+      "traceId": "trace-gc-slow-002",
+      "requestId": "req-gc-77112",
+      "message": "G1 Young Generation GC pause exceeded 200ms threshold. Pause time: 312ms, Heap before GC: 1.79GB, Heap after GC: 0.88GB, Allocation rate: 405MB/s"
+    },
+    {
+      "timestamp": "2026-05-27T14:55:40+08:00",
+      "level": "WARN",
+      "traceId": "trace-gc-slow-003",
+      "requestId": "req-gc-77135",
+      "message": "G1 Young Generation GC pause exceeded 200ms threshold. Pause time: 356ms, Heap before GC: 1.85GB, Heap after GC: 0.93GB, Allocation rate: 430MB/s. Young gen collections frequency increased from 12/min to 38/min."
+    },
+    {
+      "timestamp": "2026-05-27T14:58:22+08:00",
+      "level": "INFO",
+      "traceId": "trace-gc-slow-004",
+      "requestId": "req-gc-77150",
+      "message": "order create request completed successfully in 4800ms. No application error. Span timeline shows 4600ms spent waiting in thread pool queue."
+    },
+    {
+      "timestamp": "2026-05-27T14:59:10+08:00",
+      "level": "INFO",
+      "traceId": "trace-gc-slow-005",
+      "requestId": "req-gc-77160",
+      "message": "order submit request completed successfully in 5200ms. No application error. All downstream calls and DB queries returned normally within 50ms each. Request was stalled before reaching application handler."
+    },
+    {
+      "timestamp": "2026-05-27T14:59:45+08:00",
+      "level": "INFO",
+      "traceId": "trace-gc-slow-006",
+      "requestId": "req-gc-77170",
+      "message": "Current JVM config: -Xmx2048m -Xms512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200. Heap usage consistently above 85 percent triggering frequent young GC cycles under current traffic load of 18 req/s."
+    }
+  ]
+}

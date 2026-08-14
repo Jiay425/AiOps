@@ -1,0 +1,17 @@
+{
+  "service": "order-service",
+  "metrics": [
+    {
+      "name": "redis_command_timeout_total",
+      "query": "increase(redis_command_timeout_total{service=\"order-service\"}[5m])",
+      "value": 88,
+      "unit": "count"
+    },
+    {
+      "name": "cache_hit_rate",
+      "query": "cache_hit_rate{service=\"order-service\"}",
+      "value": 0.61,
+      "unit": "ratio"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "caseId": "incident-thread-pool-saturation",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "order-service async executor queue is full and RejectedExecutionException appears. Diagnose whether source code repair is needed.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/thread-pool-saturation/alertmanager.json",
+    "prometheus": "fixtures/incident/thread-pool-saturation/prometheus.json",
+    "logs": "fixtures/incident/thread-pool-saturation/es-logs.json",
+    "trace": "fixtures/incident/thread-pool-saturation/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "POST /api/orders/submit",
+    "strategyType": "SCALE_OR_RESOURCE",
+    "shouldEnterCodeRepair": false,
+    "rootCause": "Business thread pool saturation caused rejected async tasks. The first action is capacity and queue mitigation, not direct code patching.",
+    "expectedNoCodePatch": true
+  }
+}

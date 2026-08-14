@@ -1,0 +1,26 @@
+server:
+  port: ${ORDER_SERVICE_PORT:18081}
+
+spring:
+  application:
+    name: order-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: order-service
+      service: order-service
+
+logging:
+  file:
+    name: ${ORDER_SERVICE_LOG_FILE:../../data/log/log_error.log}
+  level:
+    root: INFO
+    com.example.order: INFO

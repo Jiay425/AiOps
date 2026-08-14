@@ -1,0 +1,19 @@
+{
+  "index": "gateway-*",
+  "hits": [
+    {
+      "timestamp": "2026-06-24T10:41:09+08:00",
+      "level": "ERROR",
+      "service": "gateway",
+      "message": "upstream order-service no live upstreams while connecting to upstream",
+      "traceId": "trace-gateway-5xx-001"
+    },
+    {
+      "timestamp": "2026-06-24T10:41:11+08:00",
+      "level": "INFO",
+      "service": "order-service",
+      "message": "NO_ANOMALY application stack trace not found for gateway trace window",
+      "traceId": "trace-gateway-5xx-001"
+    }
+  ]
+}

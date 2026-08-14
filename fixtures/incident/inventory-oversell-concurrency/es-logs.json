@@ -1,0 +1,32 @@
+{
+  "service": "order-service",
+  "index": "prod-order-service-2026.05.26",
+  "logs": [
+    {
+      "timestamp": "2026-05-26T20:15:01+08:00",
+      "level": "ERROR",
+      "traceId": "trace-inventory-oversell-001",
+      "requestId": "req-88421",
+      "message": "flash sale submit failed, skuId=sku-2001 stockBefore=1 quantity=1 stockAfter=-1 duplicateRequestId=false",
+      "exception": "java.lang.IllegalStateException: inventory oversold sku=sku-2001 stockAfter=-1",
+      "stack": [
+        "at com.example.order.InventoryService.reserve(InventoryService.java:14)",
+        "at com.example.order.OrderSubmitService.submitFlashSale(OrderSubmitService.java:35)"
+      ]
+    },
+    {
+      "timestamp": "2026-05-26T20:15:02+08:00",
+      "level": "WARN",
+      "traceId": "trace-inventory-oversell-002",
+      "requestId": "req-88421",
+      "message": "duplicate requestId processed twice, requestId=req-88421 skuId=sku-2001 createdOrders=2"
+    },
+    {
+      "timestamp": "2026-05-26T20:15:04+08:00",
+      "level": "ERROR",
+      "traceId": "trace-inventory-oversell-003",
+      "requestId": "req-88422",
+      "message": "negative stock detected after reserve, skuId=sku-2001 stockAfter=-3 successfulOrders=13 initialStock=10"
+    }
+  ]
+}

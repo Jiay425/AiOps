@@ -1,0 +1,47 @@
+{
+  "traceId": "trace-cross-file-idem-001",
+  "service": "order-service",
+  "endpoint": "POST /api/orders/submit",
+  "spans": [
+    {
+      "spanId": 1,
+      "operation": "OrderController.submitHttp",
+      "durationMs": 671,
+      "status": "ERROR"
+    },
+    {
+      "spanId": 2,
+      "parentSpanId": 1,
+      "operation": "OrderSubmitService.submitFlashSale",
+      "durationMs": 643,
+      "status": "ERROR",
+      "tags": {
+        "requestId": "req-flash-7788",
+        "duplicateAccepted": "true",
+        "visibleFailure": "true"
+      }
+    },
+    {
+      "spanId": 3,
+      "parentSpanId": 2,
+      "operation": "order idempotency check",
+      "durationMs": 2,
+      "status": "OK",
+      "tags": {
+        "requestId": "req-flash-7788",
+        "alreadyProcessed": "false",
+        "laterDuplicate": "true"
+      }
+    },
+    {
+      "spanId": 4,
+      "parentSpanId": 2,
+      "operation": "OrderRepository.create",
+      "durationMs": 91,
+      "status": "OK",
+      "tags": {
+        "createdOrdersForRequestId": "2"
+      }
+    }
+  ]
+}

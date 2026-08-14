@@ -1,0 +1,48 @@
+# Claude Code settings (may contain local config, model prefs)
+.claude/
+
+# Personal documents
+*.docx
+*.pdf
+resume_*
+
+# Debug / temp scripts
+parse_trace.py
+
+# Planning docs (not production code)
+docs/codeops-agent-upgrade-handoff.md
+docs/codeops-agent-upgrade-plan.md
+docs/codeops-incident-to-fix-demo.md
+
+# Local secrets — never commit
+application-local.yml
+**/application-local.yml
+*.local.env
+*.secret.env
+.env
+**/.env
+
+# Generated eval reports
+data/
+ops-autoagent-app/data/
+data/codeops-eval/
+data/log/
+data/incident-memory/
+**/data/log/
+**/target/
+
+# Python runtime
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+build/
+dist/
+.data/
+
+# IDE
+.idea/
+*.iml
+.vscode/

@@ -1,0 +1,41 @@
+{
+  "caseId": "incident-inventory-oversell-concurrency",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "order-service flash sale submit observed negative stock, duplicate request processing, order conflicts, and elevated 5xx responses. Diagnose and fix the issue.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/inventory-oversell-concurrency/alertmanager.json",
+    "prometheus": "fixtures/incident/inventory-oversell-concurrency/prometheus.json",
+    "logs": "fixtures/incident/inventory-oversell-concurrency/es-logs.json",
+    "trace": "fixtures/incident/inventory-oversell-concurrency/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "POST /api/orders/submit",
+    "targetFiles": [
+      "src/main/java/com/example/order/InventoryService.java",
+      "src/main/java/com/example/order/InventoryRepository.java",
+      "src/main/java/com/example/order/IdempotencyService.java",
+      "src/main/java/com/example/order/OrderSubmitService.java"
+    ],
+    "targetMethods": [
+      "reserve",
+      "submitFlashSale",
+      "alreadyProcessed",
+      "markProcessed"
+    ],
+    "rootCause": "InventoryService.reserve uses a non-atomic check-then-update stock flow, and IdempotencyService uses non-atomic duplicate request handling.",
+    "patchMustContain": [
+      "atomic",
+      "synchronized",
+      "ConcurrentHashMap",
+      "putIfAbsent",
+      "compareAndSet",
+      "requestId"
+    ],
+    "tests": [
+      "InventoryConcurrencyTest",
+      "OrderSubmitServiceConcurrencyTest"
+    ]
+  }
+}

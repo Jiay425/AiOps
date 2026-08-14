@@ -1,0 +1,38 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "OrderSubmitInventoryOversold",
+        "service": "order-service",
+        "severity": "critical",
+        "endpoint": "POST /api/orders/submit",
+        "env": "prod",
+        "repository": "samples/order-service",
+        "codeops.allowPatchApply": "true",
+        "codeops.allowTestPatchApply": "true"
+      },
+      "annotations": {
+        "summary": "order-service flash sale submit has negative stock and duplicate request processing",
+        "description": "During flash sale traffic, the submit endpoint observed negative stock, duplicate request processing, order conflicts, and elevated 5xx responses."
+      },
+      "startsAt": "2026-05-26T20:15:00+08:00",
+      "fingerprint": "inventory-oversell-concurrency"
+    }
+  ],
+  "commonLabels": {
+    "alertname": "OrderSubmitInventoryOversold",
+    "service": "order-service",
+    "severity": "critical",
+    "endpoint": "POST /api/orders/submit",
+    "repository": "samples/order-service",
+    "codeops.allowPatchApply": "true",
+    "codeops.allowTestPatchApply": "true"
+  },
+  "commonAnnotations": {
+    "summary": "order-service flash sale submit has negative stock and duplicate request processing",
+    "description": "During flash sale traffic, the submit endpoint observed negative stock, duplicate request processing, order conflicts, and elevated 5xx responses."
+  }
+}

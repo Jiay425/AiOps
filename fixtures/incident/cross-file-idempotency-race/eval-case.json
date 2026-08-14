@@ -1,0 +1,38 @@
+{
+  "caseId": "scope-expansion-cross-file-idempotency",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "order-service flash sale submit processed the same requestId twice. The first visible failing operation is OrderSubmitService.submitFlashSale, but the underlying race is in the idempotency component.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/cross-file-idempotency-race/alertmanager.json",
+    "prometheus": "fixtures/incident/cross-file-idempotency-race/prometheus.json",
+    "logs": "fixtures/incident/cross-file-idempotency-race/es-logs.json",
+    "trace": "fixtures/incident/cross-file-idempotency-race/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "POST /api/orders/submit",
+    "primaryVisibleMethod": "OrderSubmitService.submitFlashSale",
+    "targetFiles": [
+      "src/main/java/com/example/order/OrderSubmitService.java",
+      "src/main/java/com/example/order/IdempotencyService.java"
+    ],
+    "targetMethods": [
+      "submitFlashSale",
+      "alreadyProcessed",
+      "markProcessed",
+      "tryMarkProcessed"
+    ],
+    "rootCause": "OrderSubmitService performs a check-then-act idempotency flow across alreadyProcessed and markProcessed. The real fix requires an atomic idempotency operation in IdempotencyService and using it from submitFlashSale.",
+    "patchMustContain": [
+      "tryMarkProcessed",
+      "synchronized",
+      "requestId",
+      "Duplicate requestId"
+    ],
+    "tests": [
+      "OrderSubmitServiceConcurrencyTest",
+      "IdempotencyServiceAtomicityTest"
+    ]
+  }
+}

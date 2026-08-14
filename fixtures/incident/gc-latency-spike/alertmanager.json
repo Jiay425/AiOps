@@ -1,0 +1,34 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "OrderServiceP99LatencyHigh",
+        "service": "order-service",
+        "severity": "warning",
+        "endpoint": "POST /api/orders/submit",
+        "env": "prod",
+        "repository": "samples/order-service"
+      },
+      "annotations": {
+        "summary": "order-service P99 latency above 5 seconds across all endpoints",
+        "description": "P99 response latency exceeded 5000ms for 12 consecutive minutes. Error rate remains normal at 0.1 percent. No recent deployment. Suspect runtime or infrastructure issue."
+      },
+      "startsAt": "2026-05-27T15:00:00+08:00",
+      "fingerprint": "gc-latency-spike-20260527"
+    }
+  ],
+  "commonLabels": {
+    "alertname": "OrderServiceP99LatencyHigh",
+    "service": "order-service",
+    "severity": "warning",
+    "endpoint": "POST /api/orders/submit",
+    "repository": "samples/order-service"
+  },
+  "commonAnnotations": {
+    "summary": "order-service P99 latency above 5 seconds across all endpoints",
+    "description": "P99 response latency exceeded 5000ms for 12 consecutive minutes. Error rate remains normal at 0.1 percent. No recent deployment. Suspect runtime or infrastructure issue."
+  }
+}

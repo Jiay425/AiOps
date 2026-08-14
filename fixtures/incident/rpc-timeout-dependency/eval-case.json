@@ -1,0 +1,20 @@
+{
+  "caseId": "incident-rpc-timeout-dependency",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "order-service submit endpoint p99 latency increased because downstream payment-service RPC calls timed out. Diagnose whether source code repair is needed.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/rpc-timeout-dependency/alertmanager.json",
+    "prometheus": "fixtures/incident/rpc-timeout-dependency/prometheus.json",
+    "logs": "fixtures/incident/rpc-timeout-dependency/es-logs.json",
+    "trace": "fixtures/incident/rpc-timeout-dependency/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "POST /api/orders/submit",
+    "strategyType": "DEPENDENCY_INCIDENT",
+    "shouldEnterCodeRepair": false,
+    "rootCause": "Downstream payment-service RPC timeout caused order submit latency. The first action is dependency isolation, timeout review and release risk observation, not direct code patching.",
+    "expectedNoCodePatch": true
+  }
+}

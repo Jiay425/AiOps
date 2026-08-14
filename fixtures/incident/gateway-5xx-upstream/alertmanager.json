@@ -1,0 +1,22 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "GatewayOrderService5xx",
+        "service": "order-service",
+        "severity": "critical",
+        "endpoint": "POST /api/orders/submit",
+        "repository": "samples/order-service"
+      },
+      "annotations": {
+        "summary": "gateway 502 and 503 increased for order-service upstream",
+        "description": "Gateway reports upstream unavailable while order-service application logs have no matching stack trace."
+      },
+      "startsAt": "2026-06-24T10:40:00+08:00",
+      "fingerprint": "gateway-5xx-upstream"
+    }
+  ]
+}

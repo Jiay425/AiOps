@@ -1,0 +1,20 @@
+{
+  "caseId": "incident-order-create-npe",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "order-service create endpoint POST /api/orders/create returned 5xx spike in the last 5 minutes. Diagnose root cause and decide whether code repair is needed.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/order-create-npe/alertmanager.json",
+    "prometheus": "fixtures/incident/order-create-npe/prometheus.json",
+    "logs": "fixtures/incident/order-create-npe/es-logs.json",
+    "trace": "fixtures/incident/order-create-npe/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "POST /api/orders/create",
+    "strategyType": "CODE_FIX",
+    "shouldEnterCodeRepair": true,
+    "rootCause": "NullPointerException in OrderService.createOrder due to missing null check on order request field before calling OrderRepository.save.",
+    "expectedNoCodePatch": false
+  }
+}

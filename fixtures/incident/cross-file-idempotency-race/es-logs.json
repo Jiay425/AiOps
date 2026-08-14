@@ -1,0 +1,33 @@
+{
+  "service": "order-service",
+  "index": "prod-order-service-2026.05.28",
+  "logs": [
+    {
+      "timestamp": "2026-05-28T21:20:01+08:00",
+      "level": "ERROR",
+      "traceId": "trace-cross-file-idem-001",
+      "requestId": "req-flash-7788",
+      "message": "duplicate requestId was accepted twice by flash sale submit, endpoint=/api/orders/submit requestId=req-flash-7788 createdOrders=2 visibleOperation=OrderSubmitService.submitFlashSale idempotencyRace=true",
+      "exception": "java.lang.IllegalStateException: Duplicate requestId req-flash-7788 was processed successfully more than once",
+      "stack": [
+        "at com.example.order.OrderSubmitService.submitFlashSale(OrderSubmitService.java:24)",
+        "at com.example.order.OrderController.submitHttp(OrderController.java:30)",
+        "at com.example.order.OrderController.submitHttpEndpoint(OrderController.java:43)"
+      ]
+    },
+    {
+      "timestamp": "2026-05-28T21:20:02+08:00",
+      "level": "WARN",
+      "traceId": "trace-cross-file-idem-002",
+      "requestId": "req-flash-7788",
+      "message": "two concurrent requests observed alreadyProcessed=false before markProcessed, requestId=req-flash-7788, suspect check-then-act idempotency flow"
+    },
+    {
+      "timestamp": "2026-05-28T21:20:04+08:00",
+      "level": "ERROR",
+      "traceId": "trace-cross-file-idem-003",
+      "requestId": "req-flash-7812",
+      "message": "order conflict after duplicate request success, endpoint=/api/orders/submit, requestId=req-flash-7812, root symptom is idempotency race not inventory exhaustion"
+    }
+  ]
+}

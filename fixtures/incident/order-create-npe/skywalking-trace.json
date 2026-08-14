@@ -1,0 +1,53 @@
+{
+  "traceId": "trace-npe-create-001",
+  "service": "order-service",
+  "endpoint": "POST /api/orders/create",
+  "spans": [
+    {
+      "spanId": 1,
+      "operation": "HTTP POST /api/orders/create",
+      "durationMs": 12,
+      "status": "ERROR",
+      "tags": {
+        "http.status_code": "500",
+        "error.type": "java.lang.NullPointerException"
+      }
+    },
+    {
+      "spanId": 2,
+      "parentSpanId": 1,
+      "operation": "OrderController.submit",
+      "durationMs": 10,
+      "status": "ERROR",
+      "tags": {
+        "component": "com.example.order.OrderController",
+        "error.line": "30",
+        "error.file": "OrderSubmitService.java"
+      }
+    },
+    {
+      "spanId": 3,
+      "parentSpanId": 2,
+      "operation": "OrderSubmitService.submit",
+      "durationMs": 8,
+      "status": "ERROR",
+      "tags": {
+        "component": "com.example.order.OrderSubmitService",
+        "error.line": "30",
+        "error.message": "NullPointerException: userId is null"
+      }
+    },
+    {
+      "spanId": 4,
+      "parentSpanId": 3,
+      "operation": "OrderRepository.create",
+      "durationMs": 3,
+      "status": "ERROR",
+      "tags": {
+        "component": "com.example.order.OrderRepository",
+        "error.type": "NullPointerException",
+        "error.cause": "userId parameter is null, cannot insert into NOT NULL column"
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: ops-autoagent-webhook
+  group_by: ["alertname", "service", "serviceName"]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 5m
+
+receivers:
+  - name: ops-autoagent-webhook
+    webhook_configs:
+      - url: "http://host.docker.internal:8099/api/v1/ops/alert/webhook/alertmanager"
+        send_resolved: true

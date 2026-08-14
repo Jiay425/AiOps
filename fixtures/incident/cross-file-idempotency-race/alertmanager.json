@@ -1,0 +1,38 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "OrderSubmitDuplicateRequestProcessed",
+        "service": "order-service",
+        "severity": "critical",
+        "endpoint": "POST /api/orders/submit",
+        "env": "prod",
+        "repository": "samples/order-service",
+        "codeops.allowPatchApply": "true",
+        "codeops.allowTestPatchApply": "true"
+      },
+      "annotations": {
+        "summary": "order-service flash sale submit processed duplicate requestId successfully",
+        "description": "During flash sale traffic, POST /api/orders/submit created more than one order for the same requestId. The visible failing operation is OrderSubmitService.submitFlashSale, but logs suggest an idempotency race."
+      },
+      "startsAt": "2026-05-28T21:20:00+08:00",
+      "fingerprint": "cross-file-idempotency-race"
+    }
+  ],
+  "commonLabels": {
+    "alertname": "OrderSubmitDuplicateRequestProcessed",
+    "service": "order-service",
+    "severity": "critical",
+    "endpoint": "POST /api/orders/submit",
+    "repository": "samples/order-service",
+    "codeops.allowPatchApply": "true",
+    "codeops.allowTestPatchApply": "true"
+  },
+  "commonAnnotations": {
+    "summary": "order-service flash sale submit processed duplicate requestId successfully",
+    "description": "During flash sale traffic, POST /api/orders/submit created more than one order for the same requestId. The visible failing operation is OrderSubmitService.submitFlashSale, but logs suggest an idempotency race."
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "caseId": "incident-db-pool-runtime-pressure",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "order-service submit endpoint observed 5xx increase, Hikari active connections reached max, pending threads increased, and connection acquisition timed out. Diagnose whether code repair is needed.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/db-pool-runtime-pressure/alertmanager.json",
+    "prometheus": "fixtures/incident/db-pool-runtime-pressure/prometheus.json",
+    "logs": "fixtures/incident/db-pool-runtime-pressure/es-logs.json",
+    "trace": "fixtures/incident/db-pool-runtime-pressure/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "POST /api/orders/submit",
+    "strategyType": "CONFIG_FIX",
+    "shouldEnterCodeRepair": false,
+    "rootCause": "Database connection pool saturation under traffic pressure. The correct action is runtime mitigation and configuration/release risk review, not source code patching.",
+    "expectedNoCodePatch": true,
+    "riskMustContain": [
+      "Hikari",
+      "connection pool",
+      "timeout",
+      "观察",
+      "回滚"
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "traceId": "trace-order-submit-001",
+  "service": "order-service",
+  "endpoint": "POST /orders/submit",
+  "spans": [
+    {
+      "spanId": 0,
+      "operation": "POST /orders/submit",
+      "component": "SpringMVC",
+      "isError": true,
+      "durationMs": 2431
+    },
+    {
+      "spanId": 1,
+      "parentSpanId": 0,
+      "operation": "OrderController.submit",
+      "component": "Java",
+      "isError": true,
+      "durationMs": 2420
+    },
+    {
+      "spanId": 2,
+      "parentSpanId": 1,
+      "operation": "OrderSubmitService.submit",
+      "component": "Java",
+      "isError": true,
+      "durationMs": 2418,
+      "tags": {
+        "error.kind": "java.lang.NullPointerException",
+        "error.object": "OrderSubmitRequest.unitPrice"
+      }
+    }
+  ]
+}

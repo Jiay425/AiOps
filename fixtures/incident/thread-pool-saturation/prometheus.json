@@ -1,0 +1,17 @@
+{
+  "service": "order-service",
+  "metrics": [
+    {
+      "name": "executor_active_threads",
+      "query": "executor_active_threads{service=\"order-service\",executor=\"orderAsyncExecutor\"}",
+      "value": 64,
+      "unit": "threads"
+    },
+    {
+      "name": "executor_queue_size",
+      "query": "executor_queue_size{service=\"order-service\",executor=\"orderAsyncExecutor\"}",
+      "value": 1000,
+      "unit": "tasks"
+    }
+  ]
+}

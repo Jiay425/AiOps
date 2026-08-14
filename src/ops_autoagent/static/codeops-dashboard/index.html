@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoAgent Incident Command Center</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-2: #f9fafb;
+      --text: #18202a;
+      --muted: #6b7280;
+      --line: #d9dee7;
+      --accent: #0f766e;
+      --accent-soft: #d9f3ef;
+      --warn: #b45309;
+      --warn-soft: #fff2d6;
+      --bad: #b42318;
+      --bad-soft: #ffe4df;
+      --ok: #166534;
+      --ok-soft: #dcfce7;
+      --run: #1d4ed8;
+      --run-soft: #dbeafe;
+      --shadow: 0 1px 2px rgba(16, 24, 40, .06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    header {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      background: #101828;
+      color: #fff;
+      border-bottom: 1px solid #111827;
+    }
+    h1 { margin: 0; font-size: 18px; font-weight: 700; }
+    h2 { margin: 0 0 12px; font-size: 15px; font-weight: 700; }
+    h3 { margin: 0 0 8px; font-size: 14px; font-weight: 700; }
+    button {
+      height: 32px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      padding: 0 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover { border-color: #9aa4b2; }
+    .shell {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr) 420px;
+      gap: 16px;
+      padding: 16px;
+      min-height: calc(100vh - 64px);
+    }
+    .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+      min-width: 0;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .metric {
+      background: var(--panel-2);
+      border: 1px solid #e8ecf2;
+      border-radius: 6px;
+      padding: 10px;
+      min-height: 72px;
+    }
+    .metric .value { font-size: 24px; font-weight: 800; margin-top: 8px; }
+    .metric .label { color: var(--muted); font-size: 12px; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .status.READY, .status.COMPLETED, .status.SUCCESS { color: var(--ok); background: var(--ok-soft); }
+    .status.PROCESSING, .status.RUNNING, .status.WAITING_BACKGROUND_TASK { color: var(--run); background: var(--run-soft); }
+    .status.DEGRADED, .status.FAILED, .status.BLOCKED { color: var(--bad); background: var(--bad-soft); }
+    .status.QUEUED, .status.AGGREGATING, .status.WAITING_APPROVAL { color: var(--warn); background: var(--warn-soft); }
+    .row {
+      display: grid;
+      gap: 8px;
+      padding: 12px 0;
+      border-top: 1px solid #eef1f5;
+    }
+    .row:first-child { border-top: 0; padding-top: 0; }
+    .row-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      min-width: 0;
+    }
+    .name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .meta { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task {
+      cursor: pointer;
+      padding: 12px;
+      border: 1px solid #e8ecf2;
+      border-radius: 6px;
+      background: #fff;
+    }
+    .task:hover { border-color: #9aa4b2; }
+    .task.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+    .progress {
+      width: 100%;
+      height: 7px;
+      background: #e5e7eb;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .bar { height: 100%; background: var(--accent); width: 0; }
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .stage {
+      min-height: 54px;
+      padding: 8px;
+      border: 1px solid #e8ecf2;
+      border-radius: 6px;
+      background: var(--panel-2);
+      font-size: 12px;
+    }
+    .stage.RUNNING { border-color: #93c5fd; background: var(--run-soft); }
+    .stage.SUCCESS { border-color: #86efac; background: var(--ok-soft); }
+    .stage.FAILED { border-color: #fca5a5; background: var(--bad-soft); }
+    .stage.SKIPPED, .stage.WAITING { color: var(--muted); }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 240px;
+      overflow: auto;
+      padding: 12px;
+      border: 1px solid #e8ecf2;
+      border-radius: 6px;
+      background: #0b1220;
+      color: #dbeafe;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .empty { color: var(--muted); padding: 12px 0; }
+    .toolbar { display: flex; align-items: center; gap: 10px; }
+    .small { font-size: 12px; color: var(--muted); }
+    @media (max-width: 1180px) {
+      .shell { grid-template-columns: 260px minmax(0, 1fr); }
+      .right { grid-column: 1 / -1; }
+    }
+    @media (max-width: 760px) {
+      header { padding: 0 14px; }
+      .shell { grid-template-columns: 1fr; padding: 12px; }
+      .metrics, .detail-grid, .timeline { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>AutoAgent Incident Command Center</h1>
+      <div class="small" id="generatedAt">loading...</div>
+    </div>
+    <div class="toolbar">
+      <span class="status" id="systemStatus">LOADING</span>
+      <button id="refreshBtn">刷新</button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="stack">
+      <div class="panel">
+        <h2>运行总览</h2>
+        <div class="metrics">
+          <div class="metric"><div class="label">处理中</div><div class="value" id="runningCount">0</div></div>
+          <div class="metric"><div class="label">失败待处理</div><div class="value" id="failedCount">0</div></div>
+          <div class="metric"><div class="label">队列长度</div><div class="value" id="queueSize">0</div></div>
+          <div class="metric"><div class="label">可用并发槽</div><div class="value" id="availableSlots">0</div></div>
+          <div class="metric"><div class="label">LLM 调用</div><div class="value" id="llmCalls">0</div></div>
+          <div class="metric"><div class="label">估算费用</div><div class="value" id="llmCost">¥0</div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>服务状态</h2>
+        <div id="services"></div>
+      </div>
+      <div class="panel">
+        <h2>调度队列</h2>
+        <div id="queue"></div>
+      </div>
+    </section>
+
+    <section class="stack">
+      <div class="panel">
+        <h2>告警流入</h2>
+        <div id="alerts"></div>
+      </div>
+      <div class="panel">
+        <h2>Incident-to-Fix 任务</h2>
+        <div id="tasks"></div>
+      </div>
+    </section>
+
+    <section class="stack right">
+      <div class="panel">
+        <h2>处理链路</h2>
+        <div id="taskDetail" class="empty">选择一个任务查看完整链路。</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const api = {
+      overview: '/api/v1/codeops/dashboard/overview',
+      alerts: '/api/v1/codeops/dashboard/alerts',
+      tasks: '/api/v1/codeops/dashboard/tasks',
+      task: id => `/api/v1/codeops/dashboard/tasks/${encodeURIComponent(id)}`
+    };
+    let selectedTaskId = '';
+    let timer = null;
+
+    const $ = id => document.getElementById(id);
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+    const cls = value => esc(String(value || 'UNKNOWN').replace(/[^A-Za-z0-9_-]/g, '_'));
+
+    async function getJson(url) {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const body = await res.json();
+      if (body.code && body.code !== '0000') throw new Error(body.info || 'request failed');
+      return body.data;
+    }
+
+    async function refreshAll() {
+      try {
+        const [overview, alerts, tasks] = await Promise.all([
+          getJson(api.overview),
+          getJson(api.alerts),
+          getJson(api.tasks)
+        ]);
+        renderOverview(overview);
+        renderAlerts(alerts);
+        renderTasks(tasks);
+        if (selectedTaskId) await renderTaskDetail(selectedTaskId);
+      } catch (error) {
+        $('systemStatus').textContent = 'DISCONNECTED';
+        $('systemStatus').className = 'status DEGRADED';
+        $('generatedAt').textContent = error.message;
+      }
+    }
+
+    function renderOverview(data) {
+      $('generatedAt').textContent = `更新时间 ${data.generatedAt || ''}`;
+      $('systemStatus').textContent = data.systemStatus || 'UNKNOWN';
+      $('systemStatus').className = `status ${cls(data.systemStatus)}`;
+      const task = data.taskSummary || {};
+      const scheduler = data.scheduler || {};
+      const queueStats = scheduler.queueStats || {};
+      $('runningCount').textContent = task.running || 0;
+      $('failedCount').textContent = task.failed || 0;
+      $('queueSize').textContent = queueStats.queueSize || 0;
+      $('availableSlots').textContent = scheduler.availableSlots ?? 0;
+      const llmCost = data.llmCost || {};
+      $('llmCalls').textContent = llmCost.totalLlmCalls || 0;
+      $('llmCost').textContent = `¥${llmCost.totalEstimatedCostCny || 0}`;
+      renderServices(data.services || []);
+      renderQueue(scheduler.queuedIncidents || []);
+    }
+
+    function renderServices(items) {
+      $('services').innerHTML = items.length ? items.map(item => `
+        <div class="row">
+          <div class="row-title">
+            <div class="name">${esc(item.serviceName)}</div>
+            <span class="status ${cls(item.status)}">${esc(item.status)}</span>
+          </div>
+          <div class="meta">任务 ${esc(item.recentTasks)} · 活跃告警 ${esc(item.activeAlerts)} · ${esc(item.lastUpdate)}</div>
+        </div>
+      `).join('') : '<div class="empty">暂无服务活动。</div>';
+    }
+
+    function renderQueue(items) {
+      $('queue').innerHTML = items.length ? items.map(item => `
+        <div class="row">
+          <div class="row-title">
+            <div class="name">${esc(item.service)} · ${esc(item.severity)}</div>
+            <span class="status QUEUED">${esc(item.status || 'QUEUED')}</span>
+          </div>
+          <div class="meta">${esc(item.groupKey)} · alerts=${esc(item.alertCount)}</div>
+        </div>
+      `).join('') : '<div class="empty">当前无排队事故。</div>';
+    }
+
+    function renderAlerts(items) {
+      $('alerts').innerHTML = items.length ? items.map(item => `
+        <div class="row">
+          <div class="row-title">
+            <div class="name">${esc(item.alertName)} · ${esc(item.serviceName)}</div>
+            <span class="status ${cls(item.status)}">${esc(item.status)}</span>
+          </div>
+          <div class="meta">${esc(item.severity)} · ${esc(item.endpoint || 'endpoint: -')} · task=${esc(item.taskId || '-')}</div>
+          <div class="meta">${esc(item.summary)}</div>
+        </div>
+      `).join('') : '<div class="empty">暂无告警。</div>';
+    }
+
+    function renderTasks(items) {
+      $('tasks').innerHTML = items.length ? items.map(item => `
+        <div class="task ${item.taskId === selectedTaskId ? 'selected' : ''}" data-task-id="${esc(item.taskId)}">
+          <div class="row-title">
+            <div class="name">${esc(item.serviceName)} · ${esc(item.alertName)}</div>
+            <span class="status ${cls(item.status)}">${esc(item.status)}</span>
+          </div>
+          <div class="meta">${esc(item.stage)} · ${esc(item.endpoint || '-')} · tools=${esc(item.usedToolCalls)} · cost=¥${esc(item.estimatedLlmCostCny || 0)}</div>
+          <div class="progress"><div class="bar" style="width:${Math.max(0, Math.min(100, item.progressPercent || 0))}%"></div></div>
+          <div class="meta">${esc(item.lastStepSummary)}</div>
+        </div>
+      `).join('') : '<div class="empty">暂无任务。</div>';
+      document.querySelectorAll('.task[data-task-id]').forEach(node => {
+        node.addEventListener('click', () => {
+          selectedTaskId = node.getAttribute('data-task-id');
+          renderTasks(items);
+          renderTaskDetail(selectedTaskId);
+        });
+      });
+    }
+
+    async function renderTaskDetail(taskId) {
+      const detail = await getJson(api.task(taskId));
+      const view = detail.incidentView || {};
+      const task = detail.task || {};
+      const failure = detail.failure || {};
+      const llmCost = detail.llmCost || {};
+      const stages = view.stages || [];
+      const artifacts = view.artifacts || {};
+      $('taskDetail').className = '';
+      $('taskDetail').innerHTML = `
+        <div class="row-title">
+          <div>
+            <h3>${esc(task.serviceName)} · ${esc(task.alertName)}</h3>
+            <div class="meta">${esc(task.taskId)}</div>
+          </div>
+          <span class="status ${cls(task.status)}">${esc(task.status)}</span>
+        </div>
+        <div class="timeline">
+          ${stages.map(stage => `
+            <div class="stage ${cls(stage.status)}">
+              <strong>${esc(stage.stageName || stage.stageId)}</strong>
+              <div>${esc(stage.status)}</div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="detail-grid">
+          <div>
+            <h3>失败 / 阻塞</h3>
+            <pre>${esc(JSON.stringify(failure, null, 2))}</pre>
+          </div>
+          <div>
+            <h3>安全边界</h3>
+            <pre>${esc(JSON.stringify(view.guardrails || detail.security || {}, null, 2))}</pre>
+          </div>
+        </div>
+        <div style="height:12px"></div>
+        <h3>LLM 成本</h3>
+        <pre>${esc(JSON.stringify(llmCost, null, 2))}</pre>
+        <div style="height:12px"></div>
+        <h3>关键产物</h3>
+        <pre>${esc(JSON.stringify(artifacts, null, 2))}</pre>
+      `;
+    }
+
+    $('refreshBtn').addEventListener('click', refreshAll);
+    refreshAll();
+    timer = setInterval(refreshAll, 2500);
+  </script>
+</body>
+</html>

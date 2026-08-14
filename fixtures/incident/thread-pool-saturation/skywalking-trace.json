@@ -1,0 +1,13 @@
+{
+  "traceId": "trace-threadpool-001",
+  "endpoint": "POST /api/orders/submit",
+  "spans": [
+    {
+      "service": "order-service",
+      "operation": "orderAsyncExecutor.submit",
+      "type": "LOCAL",
+      "durationMs": 25,
+      "status": "REJECTED"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "traceId": "trace-rpc-timeout-001",
+  "endpoint": "POST /api/orders/submit",
+  "spans": [
+    {
+      "service": "order-service",
+      "operation": "OrderSubmitService.submit",
+      "durationMs": 4410,
+      "status": "OK"
+    },
+    {
+      "service": "payment-service",
+      "operation": "PaymentClient.confirm",
+      "type": "RPC",
+      "durationMs": 3000,
+      "status": "TIMEOUT"
+    }
+  ]
+}

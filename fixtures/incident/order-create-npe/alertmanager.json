@@ -1,0 +1,34 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "OrderCreateEndpoint5xxHigh",
+        "service": "order-service",
+        "severity": "critical",
+        "endpoint": "POST /api/orders/submit",
+        "env": "prod",
+        "repository": "samples/order-service"
+      },
+      "annotations": {
+        "summary": "order-service submit endpoint 5xx error rate spiked to 8 percent",
+        "description": "POST /api/orders/submit returned 500 Internal Server Error for 8.2 percent of requests in the last 5 minutes. Alert correlates with a new client version 2.4.1 that may send incomplete request bodies. Check logs for root cause — suspected null field in request payload."
+      },
+      "startsAt": "2026-05-27T14:30:00+08:00",
+      "fingerprint": "order-create-npe-20260527"
+    }
+  ],
+  "commonLabels": {
+    "alertname": "OrderCreateEndpoint5xxHigh",
+    "service": "order-service",
+    "severity": "critical",
+    "endpoint": "POST /api/orders/submit",
+    "repository": "samples/order-service"
+  },
+  "commonAnnotations": {
+    "summary": "order-service submit endpoint 5xx error rate spiked to 8 percent",
+    "description": "POST /api/orders/submit returned 500 Internal Server Error for 8.2 percent of requests in the last 5 minutes. Alert correlates with a new client version 2.4.1 that may send incomplete request bodies. Check logs for root cause — suspected null field in request payload."
+  }
+}

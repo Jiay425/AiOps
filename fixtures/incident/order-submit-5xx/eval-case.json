@@ -1,0 +1,27 @@
+{
+  "caseId": "incident-order-submit-5xx-npe",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "order-service POST /orders/submit 5xx 升高，请定位并生成修复建议",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/order-submit-5xx/alertmanager.json",
+    "prometheus": "fixtures/incident/order-submit-5xx/prometheus.json",
+    "logs": "fixtures/incident/order-submit-5xx/es-logs.json",
+    "trace": "fixtures/incident/order-submit-5xx/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "POST /orders/submit",
+    "targetFile": "src/main/java/com/example/order/OrderSubmitService.java",
+    "targetMethod": "submit",
+    "rootCause": "OrderSubmitRequest.unitPrice 缺少空值校验，导致金额计算时抛出 NullPointerException",
+    "patchMustContain": [
+      "unitPrice",
+      "quantity",
+      "IllegalArgumentException"
+    ],
+    "tests": [
+      "OrderSubmitServiceTest"
+    ]
+  }
+}

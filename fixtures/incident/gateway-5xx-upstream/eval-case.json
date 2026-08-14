@@ -1,0 +1,20 @@
+{
+  "caseId": "incident-gateway-5xx-upstream",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "Gateway returns 502/503 for order submit while application logs have no matching exception. Diagnose whether source code repair is needed.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/gateway-5xx-upstream/alertmanager.json",
+    "prometheus": "fixtures/incident/gateway-5xx-upstream/prometheus.json",
+    "logs": "fixtures/incident/gateway-5xx-upstream/es-logs.json",
+    "trace": "fixtures/incident/gateway-5xx-upstream/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "POST /api/orders/submit",
+    "strategyType": "DEPENDENCY_INCIDENT",
+    "shouldEnterCodeRepair": false,
+    "rootCause": "Gateway upstream availability caused edge 5xx while application evidence is clean. The first action is gateway/upstream mitigation and observation.",
+    "expectedNoCodePatch": true
+  }
+}

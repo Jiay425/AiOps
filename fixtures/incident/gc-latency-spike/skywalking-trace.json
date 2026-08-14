@@ -1,0 +1,73 @@
+{
+  "traceId": "trace-gc-slow-001",
+  "service": "order-service",
+  "endpoint": "POST /api/orders/submit",
+  "spans": [
+    {
+      "spanId": 1,
+      "operation": "HTTP POST /api/orders/submit",
+      "durationMs": 5230,
+      "status": "OK",
+      "tags": {
+        "http.status_code": "200",
+        "latency.source": "request_queuing_and_gc_stalls"
+      }
+    },
+    {
+      "spanId": 2,
+      "parentSpanId": 1,
+      "operation": "OrderController.submit",
+      "durationMs": 4980,
+      "status": "OK",
+      "tags": {
+        "component": "com.example.order.OrderController",
+        "queue.wait.ms": "4600",
+        "gc.stall.ms": "310"
+      }
+    },
+    {
+      "spanId": 3,
+      "parentSpanId": 2,
+      "operation": "OrderSubmitService.submitFlashSale",
+      "durationMs": 45,
+      "status": "OK",
+      "tags": {
+        "component": "com.example.order.OrderSubmitService",
+        "business.logic.ms": "42",
+        "no.error": "true"
+      }
+    },
+    {
+      "spanId": 4,
+      "parentSpanId": 3,
+      "operation": "InventoryService.reserve",
+      "durationMs": 12,
+      "status": "OK",
+      "tags": {
+        "component": "com.example.order.InventoryService"
+      }
+    },
+    {
+      "spanId": 5,
+      "parentSpanId": 3,
+      "operation": "IdempotencyService.alreadyProcessed",
+      "durationMs": 2,
+      "status": "OK",
+      "tags": {
+        "component": "com.example.order.IdempotencyService",
+        "duplicate": "false"
+      }
+    },
+    {
+      "spanId": 6,
+      "parentSpanId": 3,
+      "operation": "OrderRepository.create",
+      "durationMs": 18,
+      "status": "OK",
+      "tags": {
+        "component": "com.example.order.OrderRepository",
+        "db.query.ms": "15"
+      }
+    }
+  ]
+}

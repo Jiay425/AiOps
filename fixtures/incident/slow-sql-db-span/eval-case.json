@@ -1,0 +1,20 @@
+{
+  "caseId": "incident-slow-sql-db-span",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "order-service product query becomes slow because DB span SELECT product_sku takes more than 3 seconds. Diagnose whether code repair is needed.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/slow-sql-db-span/alertmanager.json",
+    "prometheus": "fixtures/incident/slow-sql-db-span/prometheus.json",
+    "logs": "fixtures/incident/slow-sql-db-span/es-logs.json",
+    "trace": "fixtures/incident/slow-sql-db-span/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "GET /api/orders/dependency-latency",
+    "strategyType": "CONFIG_FIX",
+    "shouldEnterCodeRepair": false,
+    "rootCause": "Slow SQL and DB span latency caused endpoint degradation. The first action is SQL/index investigation and release risk observation.",
+    "expectedNoCodePatch": true
+  }
+}

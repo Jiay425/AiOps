@@ -1,0 +1,30 @@
+{
+  "service": "order-service",
+  "timeWindow": "2026-05-26T20:10:00+08:00/2026-05-26T20:15:00+08:00",
+  "metrics": [
+    {
+      "name": "order_submit_5xx_rate",
+      "query": "sum(rate(http_server_requests_seconds_count{service=\"order-service\",uri=\"/api/orders/submit\",status=~\"5..\"}[5m]))",
+      "value": 0.12,
+      "unit": "ratio"
+    },
+    {
+      "name": "inventory_negative_stock_total",
+      "query": "increase(order_inventory_negative_stock_total{service=\"order-service\",sku=\"sku-2001\"}[5m])",
+      "value": 4,
+      "unit": "count"
+    },
+    {
+      "name": "duplicate_order_request_total",
+      "query": "increase(order_duplicate_request_total{service=\"order-service\"}[5m])",
+      "value": 27,
+      "unit": "count"
+    },
+    {
+      "name": "order_submit_p99_latency_ms",
+      "query": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{service=\"order-service\",uri=\"/api/orders/submit\"}[5m])) by (le))",
+      "value": 892,
+      "unit": "ms"
+    }
+  ]
+}

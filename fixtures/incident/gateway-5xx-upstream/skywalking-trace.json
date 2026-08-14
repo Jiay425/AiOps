@@ -1,0 +1,13 @@
+{
+  "traceId": "trace-gateway-5xx-001",
+  "endpoint": "POST /api/orders/submit",
+  "spans": [
+    {
+      "service": "gateway",
+      "operation": "route order-service upstream",
+      "type": "GATEWAY",
+      "durationMs": 15,
+      "status": "UPSTREAM_UNAVAILABLE"
+    }
+  ]
+}

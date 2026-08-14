@@ -1,0 +1,27 @@
+{
+  "service": "order-service",
+  "index": "prod-order-service-2026.05.26",
+  "logs": [
+    {
+      "timestamp": "2026-05-26T21:00:03+08:00",
+      "level": "WARN",
+      "traceId": "trace-db-pool-001",
+      "requestId": "req-db-10921",
+      "message": "HikariPool order-primary connection acquisition timeout after 30000ms, active=30, max=30, pending=84"
+    },
+    {
+      "timestamp": "2026-05-26T21:00:08+08:00",
+      "level": "WARN",
+      "traceId": "trace-db-pool-002",
+      "requestId": "req-db-10925",
+      "message": "database connection pool saturated during flash sale traffic, no application stack frame found in top error samples"
+    },
+    {
+      "timestamp": "2026-05-26T21:00:11+08:00",
+      "level": "INFO",
+      "traceId": "trace-db-pool-003",
+      "requestId": "req-db-10932",
+      "message": "manual mitigation applied by sre: scale order-service replicas from 4 to 8 and increase order-primary maximumPoolSize from 30 to 60"
+    }
+  ]
+}

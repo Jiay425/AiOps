@@ -1,0 +1,41 @@
+{
+  "service": "order-service",
+  "index": "prod-order-service-2026.05.27",
+  "logs": [
+    {
+      "timestamp": "2026-05-27T14:28:15+08:00",
+      "level": "ERROR",
+      "traceId": "trace-npe-create-001",
+      "requestId": "req-npe-88421",
+      "message": "Unhandled exception in OrderSubmitService.submit: java.lang.NullPointerException at line 30 — request.getUserId() returned null, passed directly to orderRepository.create()"
+    },
+    {
+      "timestamp": "2026-05-27T14:28:18+08:00",
+      "level": "ERROR",
+      "traceId": "trace-npe-create-002",
+      "requestId": "req-npe-88425",
+      "message": "Unhandled exception in OrderSubmitService.submit: java.lang.NullPointerException at line 30 — request.getUserId() returned null"
+    },
+    {
+      "timestamp": "2026-05-27T14:28:22+08:00",
+      "level": "ERROR",
+      "traceId": "trace-npe-create-003",
+      "requestId": "req-npe-88433",
+      "message": "Unhandled exception in OrderSubmitService.submit: java.lang.NullPointerException — userId field is null in OrderSubmitRequest. The submit() method validates unitPrice and quantity but does NOT validate userId or skuId before passing them to orderRepository.create() at line 29-31."
+    },
+    {
+      "timestamp": "2026-05-27T14:29:05+08:00",
+      "level": "WARN",
+      "traceId": "trace-npe-create-004",
+      "requestId": "req-npe-88450",
+      "message": "orderRepository.create() received null userId from OrderSubmitService.submit() line 30. No null guard exists before the repository call. Compare with the existing null checks for unitPrice and quantity at lines 24-26 of the same method."
+    },
+    {
+      "timestamp": "2026-05-27T14:29:30+08:00",
+      "level": "INFO",
+      "traceId": "trace-npe-create-005",
+      "requestId": "req-npe-88455",
+      "message": "incoming order submit request missing userId field in request body. Client version 2.4.1 sends empty payload for optional fields. The submit() method in OrderSubmitService.java needs a null guard for userId and skuId similar to the existing unitPrice/quantity validation."
+    }
+  ]
+}

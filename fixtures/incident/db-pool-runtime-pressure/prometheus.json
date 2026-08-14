@@ -1,0 +1,36 @@
+{
+  "service": "order-service",
+  "timeWindow": "2026-05-26T20:55:00+08:00/2026-05-26T21:00:00+08:00",
+  "metrics": [
+    {
+      "name": "hikaricp_connections_active",
+      "query": "hikaricp_connections_active{service=\"order-service\",pool=\"order-primary\"}",
+      "value": 30,
+      "unit": "connections"
+    },
+    {
+      "name": "hikaricp_connections_max",
+      "query": "hikaricp_connections_max{service=\"order-service\",pool=\"order-primary\"}",
+      "value": 30,
+      "unit": "connections"
+    },
+    {
+      "name": "hikaricp_connections_pending",
+      "query": "hikaricp_connections_pending{service=\"order-service\",pool=\"order-primary\"}",
+      "value": 86,
+      "unit": "threads"
+    },
+    {
+      "name": "hikaricp_connections_timeout_total",
+      "query": "increase(hikaricp_connections_timeout_total{service=\"order-service\",pool=\"order-primary\"}[5m])",
+      "value": 142,
+      "unit": "count"
+    },
+    {
+      "name": "order_submit_5xx_rate",
+      "query": "sum(rate(http_server_requests_seconds_count{service=\"order-service\",uri=\"/api/orders/submit\",status=~\"5..\"}[5m]))",
+      "value": 0.09,
+      "unit": "ratio"
+    }
+  ]
+}

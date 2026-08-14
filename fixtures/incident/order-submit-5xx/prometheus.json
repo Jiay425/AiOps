@@ -1,0 +1,26 @@
+{
+  "service": "order-service",
+  "timeWindow": "2026-05-25T10:07:00+08:00/2026-05-25T10:12:00+08:00",
+  "metrics": [
+    {
+      "name": "http_server_requests_seconds_count",
+      "labels": {
+        "uri": "/orders/submit",
+        "method": "POST",
+        "status": "500"
+      },
+      "value": 186,
+      "baseline": 12,
+      "summary": "POST /orders/submit 500 count increased sharply in the alert window."
+    },
+    {
+      "name": "http_server_requests_seconds_max",
+      "labels": {
+        "uri": "/orders/submit",
+        "method": "POST"
+      },
+      "value": 2.41,
+      "summary": "Latency also increased, but the dominant signal is 5xx errors."
+    }
+  ]
+}

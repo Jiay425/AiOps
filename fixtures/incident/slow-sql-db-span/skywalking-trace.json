@@ -1,0 +1,13 @@
+{
+  "traceId": "trace-slow-sql-001",
+  "endpoint": "GET /api/orders/dependency-latency",
+  "spans": [
+    {
+      "service": "order-service",
+      "operation": "SELECT product_sku",
+      "type": "DB",
+      "durationMs": 3180,
+      "status": "SLOW"
+    }
+  ]
+}

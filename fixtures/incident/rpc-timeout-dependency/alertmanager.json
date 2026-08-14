@@ -1,0 +1,29 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "OrderServiceDownstreamRpcTimeout",
+        "service": "order-service",
+        "severity": "warning",
+        "endpoint": "POST /api/orders/submit",
+        "repository": "samples/order-service"
+      },
+      "annotations": {
+        "summary": "order-service submit p99 latency increased with downstream RPC timeout",
+        "description": "SkyWalking shows payment-service RPC span timeout while application exception rate remains low."
+      },
+      "startsAt": "2026-06-24T10:00:00+08:00",
+      "fingerprint": "rpc-timeout-dependency"
+    }
+  ],
+  "commonLabels": {
+    "alertname": "OrderServiceDownstreamRpcTimeout",
+    "service": "order-service",
+    "severity": "warning",
+    "endpoint": "POST /api/orders/submit",
+    "repository": "samples/order-service"
+  }
+}

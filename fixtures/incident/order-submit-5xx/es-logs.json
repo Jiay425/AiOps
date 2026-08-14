@@ -1,0 +1,18 @@
+{
+  "service": "order-service",
+  "index": "prod-order-service-*",
+  "samples": [
+    {
+      "timestamp": "2026-05-25T10:10:37.188+08:00",
+      "level": "ERROR",
+      "traceId": "trace-order-submit-001",
+      "endpoint": "POST /orders/submit",
+      "message": "Unhandled exception while submitting order",
+      "exception": "java.lang.NullPointerException: Cannot invoke \"java.math.BigDecimal.multiply(java.math.BigDecimal)\" because the return value of \"com.example.order.OrderSubmitRequest.getUnitPrice()\" is null",
+      "stackTrace": [
+        "at com.example.order.OrderSubmitService.submit(OrderSubmitService.java:14)",
+        "at com.example.order.OrderController.submit(OrderController.java:12)"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "index": "order-service-*",
+  "hits": [
+    {
+      "timestamp": "2026-06-24T10:01:12+08:00",
+      "level": "WARN",
+      "service": "order-service",
+      "endpoint": "POST /api/orders/submit",
+      "message": "RpcException: Invoke payment-service.confirm timeout after 3000ms",
+      "traceId": "trace-rpc-timeout-001"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "index": "order-service-*",
+  "hits": [
+    {
+      "timestamp": "2026-06-24T10:11:08+08:00",
+      "level": "WARN",
+      "service": "order-service",
+      "message": "RedisCommandTimeoutException: Command timed out after 2 second(s)",
+      "traceId": "trace-redis-timeout-001"
+    }
+  ]
+}

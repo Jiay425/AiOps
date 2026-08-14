@@ -1,0 +1,20 @@
+{
+  "caseId": "incident-gc-latency-spike",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "order-service P99 latency exceeded 5 seconds across all endpoints in the last 10 minutes. No error rate increase observed. Diagnose root cause and decide whether code repair is needed.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/gc-latency-spike/alertmanager.json",
+    "prometheus": "fixtures/incident/gc-latency-spike/prometheus.json",
+    "logs": "fixtures/incident/gc-latency-spike/es-logs.json",
+    "trace": "fixtures/incident/gc-latency-spike/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "POST /api/orders/submit",
+    "strategyType": "CONFIG_FIX",
+    "shouldEnterCodeRepair": false,
+    "rootCause": "JVM young-gen GC pause times spiked due to high object allocation rate under traffic. No code defect. Recommend JVM heap tuning (-Xmx/-Xms increase, G1GC MaxGCPauseMillis adjustment) or horizontal scaling.",
+    "expectedNoCodePatch": true
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "traceId": "trace-redis-timeout-001",
+  "endpoint": "POST /api/orders/submit",
+  "spans": [
+    {
+      "service": "order-service",
+      "operation": "Redis GET order:quota",
+      "type": "CACHE",
+      "durationMs": 2100,
+      "status": "TIMEOUT"
+    }
+  ]
+}

@@ -1,0 +1,222 @@
+services:
+  mysql:
+    image: mysql:8.0.32
+    container_name: ops-mysql
+    command: --default-authentication-plugin=mysql_native_password
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: 123456
+    ports:
+      - "13306:3306"
+    volumes:
+      - ./mysql/my.cnf:/etc/mysql/conf.d/mysql.cnf:ro
+      - ./mysql/sql:/docker-entrypoint-initdb.d:ro
+      - ops_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p123456"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+    networks:
+      - ops-network
+
+  pgvector:
+    image: ${PGVECTOR_IMAGE:-pgvector/pgvector:pg16}
+    container_name: ops-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ai-rag-knowledge
+      PGPASSWORD: postgres
+    ports:
+      - "15432:5432"
+    volumes:
+      - ./pgvector/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ops_pgvector_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ai-rag-knowledge"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+    networks:
+      - ops-network
+
+  pgadmin:
+    image: dpage/pgadmin4:8.14
+    container_name: ops-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@qq.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      pgvector:
+        condition: service_healthy
+    networks:
+      - ops-network
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: ops-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ops_prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    networks:
+      - ops-network
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: ops-alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    networks:
+      - ops-network
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: ops-grafana
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      GF_SERVER_HTTP_PORT: 4000
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_DATABASE_TYPE: mysql
+      GF_DATABASE_HOST: mysql:3306
+      GF_DATABASE_NAME: grafana
+      GF_DATABASE_USER: root
+      GF_DATABASE_PASSWORD: 123456
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+      alertmanager:
+        condition: service_started
+    networks:
+      - ops-network
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    container_name: ops-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    networks:
+      - ops-network
+
+  elasticsearch:
+    image: elasticsearch:7.17.28
+    container_name: ops-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      cluster.name: ops-elasticsearch
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      xpack.security.enabled: "false"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - ops_elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - ops-network
+
+  logstash:
+    image: logstash:7.17.28
+    container_name: ops-logstash
+    restart: unless-stopped
+    environment:
+      LS_JAVA_OPTS: -Xms512m -Xmx512m
+      TZ: Asia/Shanghai
+      MONITORING_ENABLED: "false"
+    ports:
+      - "4560:4560"
+      - "19600:9600"
+    volumes:
+      - ./logstash/logstash-ops-full.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - ../../data/log:/app/log:ro
+    depends_on:
+      - elasticsearch
+    networks:
+      - ops-network
+
+  kibana:
+    image: kibana:7.17.28
+    container_name: ops-kibana
+    restart: unless-stopped
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      I18N_LOCALE: zh-CN
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - ops-network
+
+  skywalking-oap:
+    image: apache/skywalking-oap-server:9.7.0
+    container_name: ops-skywalking-oap
+    restart: unless-stopped
+    environment:
+      SW_STORAGE: elasticsearch
+      SW_STORAGE_ES_CLUSTER_NODES: elasticsearch:9200
+      TZ: Asia/Shanghai
+    ports:
+      - "11800:11800"
+      - "12800:12800"
+    depends_on:
+      - elasticsearch
+    networks:
+      - ops-network
+
+  skywalking-ui:
+    image: apache/skywalking-ui:9.7.0
+    container_name: ops-skywalking-ui
+    restart: unless-stopped
+    environment:
+      SW_OAP_ADDRESS: http://skywalking-oap:12800
+      TZ: Asia/Shanghai
+    ports:
+      - "18080:8080"
+    depends_on:
+      - skywalking-oap
+    networks:
+      - ops-network
+
+volumes:
+  ops_mysql_data:
+  ops_pgvector_data:
+  ops_prometheus_data:
+  ops_elasticsearch_data:
+
+networks:
+  ops-network:
+    driver: bridge

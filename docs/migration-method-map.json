@@ -1,0 +1,114 @@
+{
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/security/HumanApprovalGate.java::HumanApprovalGate.submitForApproval/14@20": {
+    "targets": ["ops_autoagent.graphs.codeops:_approval_payload"],
+    "tests": ["tests/test_codeops_runtime.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/security/HumanApprovalGate.java::HumanApprovalGate.isApprovalRequired/3@50": {
+    "targets": ["ops_autoagent.graphs.codeops:_approval_payload"],
+    "tests": ["tests/test_codeops_runtime.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/security/HumanApprovalGate.java::HumanApprovalGate.approve/1@58": {
+    "targets": ["ops_autoagent.api:decide_approval"],
+    "tests": ["tests/test_api.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/security/HumanApprovalGate.java::HumanApprovalGate.reject/2@70": {
+    "targets": ["ops_autoagent.api:decide_approval"],
+    "tests": ["tests/test_api.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/security/HumanApprovalGate.java::HumanApprovalGate.getStatus/1@82": {
+    "targets": ["ops_autoagent.api:task_approval_status", "ops_autoagent.api:evaluation_approval_status"],
+    "tests": ["tests/test_api.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.submit/1@97": {
+    "targets": ["ops_autoagent.graphs.codeops:invoke", "ops_autoagent.api:submit_task"],
+    "tests": ["tests/test_api.py", "tests/test_graphs.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.query/1@132": {
+    "targets": ["ops_autoagent.api:query_task"],
+    "tests": ["tests/test_api.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.listRecent/1@136": {
+    "targets": ["ops_autoagent.api:recent_tasks"],
+    "tests": ["tests/test_api.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.listSkills/0@145": {
+    "targets": ["ops_autoagent.api:list_skills"],
+    "tests": ["tests/test_api.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.submitApprovalIfNeeded/1@352": {
+    "targets": ["ops_autoagent.graphs.codeops:_approval_payload"],
+    "tests": ["tests/test_codeops_runtime.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.hasRealPassingTestResult/2@419": {
+    "targets": ["ops_autoagent.graphs.codeops:_real_tests_passed"],
+    "tests": ["tests/test_codeops_runtime.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.approvalReasons/9@465": {
+    "targets": ["ops_autoagent.graphs.codeops:_approval_payload"],
+    "tests": ["tests/test_codeops_runtime.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.resolveMaxRounds/1@1183": {
+    "targets": ["ops_autoagent.graphs.codeops:invoke"],
+    "tests": ["tests/test_api.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.attachGuardrailSummary/1@1202": {
+    "targets": ["ops_autoagent.graphs.codeops:_summarize"],
+    "tests": ["tests/test_graphs.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.buildGuardrailSummary/1@1215": {
+    "targets": ["ops_autoagent.graphs.codeops:_summarize"],
+    "tests": ["tests/test_graphs.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.buildFinalSummary/1@1242": {
+    "targets": ["ops_autoagent.graphs.codeops:_summarize"],
+    "tests": ["tests/test_graphs.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.isFailureStop/2@1256": {
+    "targets": ["ops_autoagent.graphs.codeops:_summarize"],
+    "tests": ["tests/test_graphs.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java::EngineeringTaskAgentService.normalizeTaskType/1@1283": {
+    "targets": ["ops_autoagent.graphs.codeops:invoke"],
+    "tests": ["tests/test_api.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java::IncidentFixOrchestratorPolicy.decide/2@21": {
+    "targets": ["ops_autoagent.codeops.orchestrator:decide"],
+    "tests": ["tests/test_orchestrator.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java::IncidentFixOrchestratorPolicy.decideIncidentToFix/2@35": {
+    "targets": ["ops_autoagent.codeops.orchestrator:_incident"],
+    "tests": ["tests/test_orchestrator.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java::IncidentFixOrchestratorPolicy.decideIssueToPatch/2@112": {
+    "targets": ["ops_autoagent.codeops.orchestrator:_issue"],
+    "tests": ["tests/test_orchestrator.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java::IncidentFixOrchestratorPolicy.decideReleaseRisk/2@151": {
+    "targets": ["ops_autoagent.codeops.orchestrator:_release"],
+    "tests": ["tests/test_orchestrator.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java::IncidentFixOrchestratorPolicy.decideCodeReview/2@176": {
+    "targets": ["ops_autoagent.codeops.orchestrator:_review"],
+    "tests": ["tests/test_orchestrator.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java::IncidentFixOrchestratorPolicy.needsAgentLoopInvestigation/2@205": {
+    "targets": ["ops_autoagent.codeops.orchestrator:_needs_agent_loop"],
+    "tests": ["tests/test_orchestrator.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java::IncidentFixOrchestratorPolicy.needsRepoUnderstandingAfterAgentLoop/2@218": {
+    "targets": ["ops_autoagent.codeops.orchestrator:_needs_repo_after_loop"],
+    "tests": ["tests/test_orchestrator.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java::IncidentFixOrchestratorPolicy.shouldEnterCodeRepair/2@232": {
+    "targets": ["ops_autoagent.codeops.orchestrator:_should_repair"],
+    "tests": ["tests/test_orchestrator.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java::IncidentFixOrchestratorPolicy.isLocalizationBlocking/1@270": {
+    "targets": ["ops_autoagent.codeops.orchestrator:_localization_blocking"],
+    "tests": ["tests/test_orchestrator.py"]
+  },
+  "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java::IncidentFixOrchestratorPolicy.isNoCodeFix/2@340": {
+    "targets": ["ops_autoagent.codeops.orchestrator:_no_code_fix"],
+    "tests": ["tests/test_orchestrator.py"]
+  }
+}

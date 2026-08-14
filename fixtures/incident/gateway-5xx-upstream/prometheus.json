@@ -1,0 +1,17 @@
+{
+  "service": "order-service",
+  "metrics": [
+    {
+      "name": "gateway_5xx_rate_percent",
+      "query": "sum(rate(nginx_http_requests_total{upstream=\"order-service\",status=~\"5..\"}[5m]))",
+      "value": 12.4,
+      "unit": "percent"
+    },
+    {
+      "name": "application_5xx_rate_percent",
+      "query": "sum(rate(http_server_requests_seconds_count{service=\"order-service\",status=~\"5..\"}[5m]))",
+      "value": 0.2,
+      "unit": "percent"
+    }
+  ]
+}

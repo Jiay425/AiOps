@@ -1,0 +1,12 @@
+{
+  "index": "order-service-*",
+  "hits": [
+    {
+      "timestamp": "2026-06-24T10:31:22+08:00",
+      "level": "ERROR",
+      "service": "order-service",
+      "message": "RejectedExecutionException: Task rejected from orderAsyncExecutor because queue capacity reached",
+      "traceId": "trace-threadpool-001"
+    }
+  ]
+}

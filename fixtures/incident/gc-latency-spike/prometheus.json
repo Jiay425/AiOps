@@ -1,0 +1,54 @@
+{
+  "service": "order-service",
+  "timeWindow": "2026-05-27T14:50:00+08:00/2026-05-27T15:00:00+08:00",
+  "metrics": [
+    {
+      "name": "p99_latency_ms",
+      "query": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{service=\"order-service\"}[5m])) by (le))",
+      "value": 6720,
+      "unit": "milliseconds"
+    },
+    {
+      "name": "p50_latency_ms",
+      "query": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{service=\"order-service\"}[5m])) by (le))",
+      "value": 380,
+      "unit": "milliseconds"
+    },
+    {
+      "name": "jvm_memory_heap_used_bytes",
+      "query": "jvm_memory_used_bytes{service=\"order-service\",area=\"heap\"}",
+      "value": 1820000000,
+      "unit": "bytes"
+    },
+    {
+      "name": "jvm_memory_heap_max_bytes",
+      "query": "jvm_memory_max_bytes{service=\"order-service\",area=\"heap\"}",
+      "value": 2147483648,
+      "unit": "bytes"
+    },
+    {
+      "name": "jvm_gc_pause_seconds_sum",
+      "query": "increase(jvm_gc_pause_seconds_sum{service=\"order-service\",gc=\"G1 Young Generation\"}[5m])",
+      "value": 42.5,
+      "unit": "seconds"
+    },
+    {
+      "name": "jvm_gc_pause_seconds_count",
+      "query": "increase(jvm_gc_pause_seconds_count{service=\"order-service\",gc=\"G1 Young Generation\"}[5m])",
+      "value": 380,
+      "unit": "count"
+    },
+    {
+      "name": "error_rate",
+      "query": "sum(rate(http_server_requests_seconds_count{service=\"order-service\",status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count{service=\"order-service\"}[5m]))",
+      "value": 0.001,
+      "unit": "ratio"
+    },
+    {
+      "name": "request_rate",
+      "query": "sum(rate(http_server_requests_seconds_count{service=\"order-service\"}[5m]))",
+      "value": 18.5,
+      "unit": "req/s"
+    }
+  ]
+}

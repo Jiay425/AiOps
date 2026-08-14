@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>生产报错智能诊断台</title>
+    <style>
+        :root {
+            --bg: #f7f8fa;
+            --surface: #ffffff;
+            --text: #182027;
+            --muted: #60707f;
+            --line: #d7dee6;
+            --green: #0f8f5f;
+            --red: #c93636;
+            --amber: #b7791f;
+            --ink: #202a33;
+            --accent: #0b7c86;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-width: 320px;
+            color: var(--text);
+            background: var(--bg);
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            line-height: 1.5;
+        }
+
+        header {
+            padding: 24px;
+            color: #ffffff;
+            background: #263238;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        header p {
+            margin: 8px 0 0;
+            color: #dce4ea;
+        }
+
+        main {
+            display: grid;
+            grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+            gap: 16px;
+            padding: 16px;
+        }
+
+        section {
+            min-width: 0;
+            padding: 16px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--surface);
+        }
+
+        h2 {
+            margin: 0 0 12px;
+            font-size: 18px;
+        }
+
+        label {
+            display: block;
+            margin: 12px 0 6px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: var(--text);
+            background: #ffffff;
+            font: inherit;
+        }
+
+        textarea {
+            min-height: 92px;
+            resize: vertical;
+        }
+
+        button {
+            min-height: 40px;
+            padding: 10px 12px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            color: #ffffff;
+            background: var(--ink);
+            font: inherit;
+            cursor: pointer;
+        }
+
+        button.secondary {
+            color: var(--ink);
+            border-color: var(--line);
+            background: #ffffff;
+        }
+
+        button.warn {
+            background: var(--amber);
+        }
+
+        button.danger {
+            background: var(--red);
+        }
+
+        button.primary {
+            background: var(--accent);
+        }
+
+        button:disabled {
+            opacity: 0.55;
+            cursor: wait;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .actions .wide {
+            grid-column: 1 / -1;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(120px, 1fr));
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .status-item {
+            min-height: 78px;
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #fbfcfd;
+        }
+
+        .status-item strong {
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 6px;
+            color: #ffffff;
+            background: var(--muted);
+            font-size: 13px;
+        }
+
+        .pill.ok {
+            background: var(--green);
+        }
+
+        .pill.bad {
+            background: var(--red);
+        }
+
+        .pill.wait {
+            background: var(--amber);
+        }
+
+        .workspace {
+            display: grid;
+            grid-template-rows: auto minmax(220px, 1fr) minmax(260px, 1.1fr);
+            gap: 16px;
+            min-height: calc(100vh - 120px);
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .note {
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .log,
+        .report {
+            width: 100%;
+            min-height: 220px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            color: #162028;
+            background: #fdfefe;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 13px;
+        }
+
+        .report {
+            min-height: 260px;
+        }
+
+        @media (max-width: 920px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+
+            .status-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 560px) {
+            header,
+            main {
+                padding: 12px;
+            }
+
+            .row,
+            .actions,
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>生产报错智能诊断台</h1>
+    <p>ops-demo-service 在指定时间窗口出现大量 500 错误，请分析原因并给出修复建议。</p>
+</header>
+
+<main>
+    <section>
+        <h2>故障输入</h2>
+        <label for="serviceName">服务名</label>
+        <input id="serviceName" value="ops-demo-service">
+
+        <div class="row">
+            <div>
+                <label for="startTime">开始时间</label>
+                <input id="startTime" type="datetime-local">
+            </div>
+            <div>
+                <label for="endTime">结束时间</label>
+                <input id="endTime" type="datetime-local">
+            </div>
+        </div>
+
+        <label for="problem">故障描述</label>
+        <textarea id="problem">ops-demo-service 在最近 10 分钟出现大量 500 错误，请分析 Prometheus 指标，判断根因候选，并给出临时止血和长期优化建议。</textarea>
+
+        <label for="traceId">traceId</label>
+        <input id="traceId" placeholder="没有就留空">
+
+        <div class="actions">
+            <button class="secondary" id="checkBtn">检查环境</button>
+            <button class="danger" id="errorBtn">制造 500</button>
+            <button class="warn" id="slowBtn">制造慢请求</button>
+            <button class="warn" id="dbBtn">占用数据库连接</button>
+            <button class="primary wide" id="demoBtn">一键演示闭环</button>
+            <button class="wide" id="analyzeBtn">开始智能诊断</button>
+        </div>
+
+        <p class="note" id="tips">先点“一键演示闭环”：检查环境 -> 制造故障 -> 等待 Prometheus 采集 -> 自动诊断。</p>
+    </section>
+
+    <div class="workspace">
+        <section>
+            <div class="status-grid">
+                <div class="status-item">
+                    <strong>应用</strong>
+                    <span class="pill wait" id="appStatus">待检查</span>
+                </div>
+                <div class="status-item">
+                    <strong>MySQL</strong>
+                    <span class="pill wait" id="mysqlStatus">待检查</span>
+                </div>
+                <div class="status-item">
+                    <strong>PgVector</strong>
+                    <span class="pill wait" id="pgVectorStatus">待检查</span>
+                </div>
+                <div class="status-item">
+                    <strong>Prometheus</strong>
+                    <span class="pill wait" id="promStatus">待检查</span>
+                </div>
+                <div class="status-item">
+                    <strong>采集目标</strong>
+                    <span class="pill wait" id="targetStatus">待检查</span>
+                </div>
+                <div class="status-item">
+                    <strong>ELK</strong>
+                    <span class="pill wait" id="elkStatus">待检查</span>
+                </div>
+                <div class="status-item">
+                    <strong>SkyWalking</strong>
+                    <span class="pill wait" id="skyWalkingStatus">待检查</span>
+                </div>
+            </div>
+            <div class="toolbar">
+                <button class="secondary" id="recordBtn">查询诊断记录</button>
+                <span class="note">diagnosisId：<span id="diagnosisId">暂无</span></span>
+            </div>
+        </section>
+
+        <section>
+            <h2>执行过程</h2>
+            <div class="log" id="eventLog">等待开始。</div>
+        </section>
+
+        <section>
+            <h2>诊断报告</h2>
+            <div class="report" id="report">诊断完成后，这里会显示最终报告和落库记录。</div>
+        </section>
+    </div>
+</main>
+
+<script>
+    const $ = (id) => document.getElementById(id);
+    const buttons = ["checkBtn", "errorBtn", "slowBtn", "dbBtn", "demoBtn", "analyzeBtn", "recordBtn"].map($);
+    let latestDiagnosisId = "";
+
+    bootTimeWindow();
+
+    $("checkBtn").addEventListener("click", checkEnvironment);
+    $("errorBtn").addEventListener("click", () => generateFault("error", 24));
+    $("slowBtn").addEventListener("click", () => generateFault("slow", 10));
+    $("dbBtn").addEventListener("click", () => generateFault("db", 12));
+    $("analyzeBtn").addEventListener("click", analyze);
+    $("recordBtn").addEventListener("click", queryRecord);
+    $("demoBtn").addEventListener("click", runDemo);
+
+    async function runDemo() {
+        setBusy(true);
+        try {
+            clearOutput();
+            appendLog("1. 检查应用、MySQL、Prometheus、采集目标。");
+            await checkEnvironment(false);
+            appendLog("2. 制造 500 错误和慢请求。");
+            await generateFault("error", 24, false);
+            await generateFault("slow", 8, false);
+            appendLog("3. 占用数据库连接 10 秒，制造 Hikari 活跃连接信号。");
+            generateFault("db", 10, false);
+            appendLog("4. 等待 18 秒，让 Prometheus 完成一次 scrape。");
+            await wait(18000);
+            bootTimeWindow();
+            appendLog("5. 开始智能诊断。");
+            await analyze(false);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function checkEnvironment(manageBusy = true) {
+        if (manageBusy) {
+            setBusy(true);
+        }
+        try {
+            const response = await fetch("/api/v1/ops/mock/environment");
+            const data = await response.json();
+            setStatus("appStatus", data.app === "UP");
+            setStatus("mysqlStatus", data.mysql && data.mysql.status === "UP");
+            setStatus("pgVectorStatus", data.pgvector && data.pgvector.status === "UP");
+            setStatus("promStatus", data.prometheus && data.prometheus.status === "UP");
+            setStatus("targetStatus", data.prometheus && data.prometheus.appTargetVisible);
+            setStatus("elkStatus", data.elk && data.elk.status === "UP");
+            setStatus("skyWalkingStatus", data.skywalking && data.skywalking.status === "UP");
+            appendLog("环境检查结果：\n" + JSON.stringify(data, null, 2));
+        } catch (error) {
+            setStatus("appStatus", false);
+            appendLog("环境检查失败：" + error.message);
+        } finally {
+            if (manageBusy) {
+                setBusy(false);
+            }
+        }
+    }
+
+    async function generateFault(mode, count, manageBusy = true) {
+        if (manageBusy) {
+            setBusy(true);
+        }
+        try {
+            appendLog(`开始制造 ${mode} 请求，数量 ${count}。`);
+            const requests = [];
+            for (let i = 0; i < count; i++) {
+                const url = `/api/v1/ops/mock/order/create?mode=${mode}&sleepMillis=1600&holdSeconds=10&ts=${Date.now()}-${i}`;
+                requests.push(fetch(url).then(async (res) => ({
+                    ok: res.ok,
+                    status: res.status,
+                    body: await safeText(res)
+                })));
+            }
+            const results = await Promise.allSettled(requests);
+            const ok = results.filter(item => item.status === "fulfilled" && item.value.ok).length;
+            const failed = results.length - ok;
+            appendLog(`${mode} 请求完成：成功 ${ok}，失败/500 ${failed}。`);
+        } finally {
+            if (manageBusy) {
+                setBusy(false);
+            }
+        }
+    }
+
+    async function analyze(manageBusy = true) {
+        if (manageBusy) {
+            setBusy(true);
+            clearOutput();
+        }
+        latestDiagnosisId = "";
+        $("diagnosisId").textContent = "生成中";
+        $("report").textContent = "诊断中...";
+
+        try {
+            const response = await fetch("/api/v1/ops/incident/analyze", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(buildRequest())
+            });
+            if (!response.body) {
+                throw new Error("浏览器不支持流式读取响应。");
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+            while (true) {
+                const {value, done} = await reader.read();
+                if (done) {
+                    break;
+                }
+                buffer += decoder.decode(value, {stream: true});
+                buffer = consumeSseBuffer(buffer);
+            }
+            consumeSseBuffer(buffer + "\n\n");
+        } catch (error) {
+            appendLog("诊断失败：" + error.message);
+            $("report").textContent = "诊断失败：" + error.message;
+        } finally {
+            if (manageBusy) {
+                setBusy(false);
+            }
+        }
+    }
+
+    async function queryRecord() {
+        if (!latestDiagnosisId) {
+            appendLog("还没有 diagnosisId，先完成一次诊断。");
+            return;
+        }
+        setBusy(true);
+        try {
+            const response = await fetch(`/api/v1/ops/incident/record/${encodeURIComponent(latestDiagnosisId)}`);
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || data.info || `HTTP ${response.status}`);
+            }
+            $("report").textContent = renderRecord(data);
+            appendLog("已查询落库诊断记录：" + latestDiagnosisId);
+        } catch (error) {
+            appendLog("查询诊断记录失败：" + error.message);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    function consumeSseBuffer(buffer) {
+        const parts = buffer.split("\n\n");
+        for (let i = 0; i < parts.length - 1; i++) {
+            const raw = parts[i].trim();
+            if (!raw) {
+                continue;
+            }
+            const dataLine = raw.split("\n")
+                .filter(line => line.startsWith("data:"))
+                .map(line => line.substring(5).trim())
+                .join("");
+            if (!dataLine) {
+                continue;
+            }
+            handleEvent(JSON.parse(dataLine));
+        }
+        return parts[parts.length - 1];
+    }
+
+    function handleEvent(event) {
+        const step = event.step ? `Step ${event.step}` : event.type;
+        if (event.subType === "diagnosis_report") {
+            $("report").textContent = event.content || "";
+            appendLog(`[${step}] ${event.subType || ""}\n诊断报告已生成，已展示在下方“诊断报告”区域。`);
+        } else {
+            appendLog(`[${step}] ${event.subType || ""}\n${event.content || ""}`);
+        }
+        const match = (event.content || "").match(/diagnosisId=(diag-[a-zA-Z0-9-]+)/);
+        if (match) {
+            latestDiagnosisId = match[1];
+            $("diagnosisId").textContent = latestDiagnosisId;
+        }
+        if (event.completed && latestDiagnosisId) {
+            appendLog("诊断完成，可点击“查询诊断记录”查看 MySQL 落库内容。");
+        }
+    }
+
+    function renderRecord(response) {
+        if (!response || response.code !== "0000" || !response.data) {
+            return JSON.stringify(response, null, 2);
+        }
+        const record = response.data;
+        const metric = parseJson(record.metricEvidenceJson, {});
+        const candidates = parseJson(record.evidenceChainJson, []);
+        const runbooks = parseJson(record.runbookJson, []);
+
+        const lines = [];
+        lines.push("复盘记录已落库");
+        lines.push("");
+        lines.push(`诊断ID：${record.diagnosisId}`);
+        lines.push(`服务：${record.serviceName}`);
+        lines.push(`窗口：${record.startTime} ~ ${record.endTime}`);
+        lines.push(`状态：${record.status}`);
+        lines.push("");
+
+        lines.push("关键指标");
+        const observations = metric.observations || [];
+        const anomalyObservations = observations.filter(item => String(item).startsWith("ANOMALY:"));
+        const selectedObservations = anomalyObservations.length > 0 ? anomalyObservations : observations.slice(0, 8);
+        if (selectedObservations.length === 0) {
+            lines.push("- 暂无 Prometheus 指标摘要。");
+        } else {
+            selectedObservations.forEach(item => lines.push(`- ${item}`));
+        }
+        lines.push("");
+
+        lines.push("根因候选");
+        if (!Array.isArray(candidates) || candidates.length === 0) {
+            lines.push("- 暂无根因候选。");
+        } else {
+            candidates.forEach((candidate, index) => {
+                lines.push(`${index + 1}. ${candidate.cause}`);
+                lines.push(`   分类：${candidate.category}，置信度：${candidate.confidence}`);
+                lines.push(`   判断：${candidate.reasoning}`);
+                const evidences = candidate.evidences || [];
+                evidences.slice(0, 3).forEach((evidence, evidenceIndex) => {
+                    lines.push(`   证据${evidenceIndex + 1}：[${evidence.source}/${evidence.category}] ${evidence.title} - ${trimText(evidence.detail, 180)}`);
+                });
+            });
+        }
+        lines.push("");
+
+        lines.push("匹配 Runbook");
+        if (!Array.isArray(runbooks) || runbooks.length === 0) {
+            lines.push("- 暂无匹配 runbook。");
+        } else {
+            runbooks.slice(0, 4).forEach((runbook, index) => {
+                lines.push(`${index + 1}. ${runbook.title}，score=${runbook.score}，path=${runbook.path}`);
+            });
+        }
+        lines.push("");
+
+        lines.push("最终报告");
+        lines.push(record.report || "暂无报告内容。");
+        return lines.join("\n");
+    }
+
+    function parseJson(value, fallback) {
+        if (!value) {
+            return fallback;
+        }
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            return fallback;
+        }
+    }
+
+    function trimText(value, maxLength) {
+        if (!value) {
+            return "";
+        }
+        const text = String(value).replace(/\s+/g, " ").trim();
+        return text.length <= maxLength ? text : text.substring(0, maxLength) + "...";
+    }
+
+    function buildRequest() {
+        return {
+            serviceName: $("serviceName").value.trim(),
+            startTime: formatDateTime($("startTime").value),
+            endTime: formatDateTime($("endTime").value),
+            problem: $("problem").value.trim(),
+            traceId: $("traceId").value.trim(),
+            maxStep: 9
+        };
+    }
+
+    function bootTimeWindow() {
+        const end = roundUpToNextMinute(new Date());
+        const start = new Date(end.getTime() - 10 * 60 * 1000);
+        $("startTime").value = toInputDateTime(start);
+        $("endTime").value = toInputDateTime(end);
+    }
+
+    function roundUpToNextMinute(date) {
+        const rounded = new Date(date);
+        rounded.setSeconds(0, 0);
+        rounded.setMinutes(rounded.getMinutes() + 1);
+        return rounded;
+    }
+
+    function toInputDateTime(date) {
+        const pad = (value) => String(value).padStart(2, "0");
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    function formatDateTime(value) {
+        return value ? value.replace("T", " ") + ":00" : "";
+    }
+
+    function setStatus(id, ok) {
+        const el = $(id);
+        el.textContent = ok ? "正常" : "异常";
+        el.className = "pill " + (ok ? "ok" : "bad");
+    }
+
+    async function safeText(response) {
+        try {
+            return await response.text();
+        } catch (error) {
+            return error.message;
+        }
+    }
+
+    function clearOutput() {
+        $("eventLog").textContent = "";
+        $("report").textContent = "等待诊断报告。";
+    }
+
+    function appendLog(message) {
+        const el = $("eventLog");
+        const now = new Date().toLocaleTimeString();
+        el.textContent += `[${now}] ${message}\n\n`;
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function setBusy(busy) {
+        buttons.forEach(button => button.disabled = busy);
+    }
+
+    function wait(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+</script>
+</body>
+</html>
+

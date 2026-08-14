@@ -1,0 +1,22 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "OrderServiceThreadPoolSaturation",
+        "service": "order-service",
+        "severity": "warning",
+        "endpoint": "POST /api/orders/submit",
+        "repository": "samples/order-service"
+      },
+      "annotations": {
+        "summary": "business executor queue full",
+        "description": "Executor active threads close to max, queue remains full and RejectedExecutionException appears."
+      },
+      "startsAt": "2026-06-24T10:30:00+08:00",
+      "fingerprint": "thread-pool-saturation"
+    }
+  ]
+}

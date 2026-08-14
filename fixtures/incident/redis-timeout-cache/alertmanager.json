@@ -1,0 +1,22 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "OrderServiceRedisTimeout",
+        "service": "order-service",
+        "severity": "warning",
+        "endpoint": "POST /api/orders/submit",
+        "repository": "samples/order-service"
+      },
+      "annotations": {
+        "summary": "Redis command timeout affects order submit",
+        "description": "Redis GET span timeout and cache command timeout logs increased in the same window."
+      },
+      "startsAt": "2026-06-24T10:10:00+08:00",
+      "fingerprint": "redis-timeout-cache"
+    }
+  ]
+}

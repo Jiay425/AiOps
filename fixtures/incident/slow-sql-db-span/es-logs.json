@@ -1,0 +1,12 @@
+{
+  "index": "order-service-*",
+  "hits": [
+    {
+      "timestamp": "2026-06-24T10:21:03+08:00",
+      "level": "WARN",
+      "service": "order-service",
+      "message": "slow query SELECT product_sku WHERE status = ? duration=3180ms Rows_examined=480000",
+      "traceId": "trace-slow-sql-001"
+    }
+  ]
+}

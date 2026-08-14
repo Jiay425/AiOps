@@ -1,0 +1,34 @@
+{
+  "receiver": "codeops-incident-to-fix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "OrderServiceDbPoolExhausted",
+        "service": "order-service",
+        "severity": "warning",
+        "endpoint": "POST /api/orders/submit",
+        "env": "prod",
+        "repository": "samples/order-service"
+      },
+      "annotations": {
+        "summary": "order-service database connection pool pending and timeout increased",
+        "description": "Submit endpoint 5xx increased while Hikari active connections reached max and pending threads increased during traffic spike."
+      },
+      "startsAt": "2026-05-26T21:00:00+08:00",
+      "fingerprint": "db-pool-runtime-pressure"
+    }
+  ],
+  "commonLabels": {
+    "alertname": "OrderServiceDbPoolExhausted",
+    "service": "order-service",
+    "severity": "warning",
+    "endpoint": "POST /api/orders/submit",
+    "repository": "samples/order-service"
+  },
+  "commonAnnotations": {
+    "summary": "order-service database connection pool pending and timeout increased",
+    "description": "Submit endpoint 5xx increased while Hikari active connections reached max and pending threads increased during traffic spike."
+  }
+}

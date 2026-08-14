@@ -1,0 +1,10 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "ops_diagnosis": "./src/ops_autoagent/graph_exports.py:ops_diagnosis_graph",
+    "codeops": "./src/ops_autoagent/graph_exports.py:codeops_graph"
+  },
+  "env": ".env"
+}
+

@@ -1,0 +1,30 @@
+{
+  "service": "order-service",
+  "timeWindow": "2026-05-28T21:15:00+08:00/2026-05-28T21:20:00+08:00",
+  "metrics": [
+    {
+      "name": "order_submit_5xx_rate",
+      "query": "sum(rate(http_server_requests_seconds_count{service=\"order-service\",uri=\"/api/orders/submit\",status=~\"5..\"}[5m]))",
+      "value": 0.086,
+      "unit": "ratio"
+    },
+    {
+      "name": "duplicate_request_success_total",
+      "query": "increase(order_duplicate_request_success_total{service=\"order-service\",endpoint=\"/api/orders/submit\"}[5m])",
+      "value": 19,
+      "unit": "count"
+    },
+    {
+      "name": "order_conflict_total",
+      "query": "increase(order_conflict_total{service=\"order-service\",reason=\"duplicate_request_id\"}[5m])",
+      "value": 31,
+      "unit": "count"
+    },
+    {
+      "name": "order_submit_p99_latency_ms",
+      "query": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{service=\"order-service\",uri=\"/api/orders/submit\"}[5m])) by (le))",
+      "value": 642,
+      "unit": "ms"
+    }
+  ]
+}

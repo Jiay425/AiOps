@@ -1,0 +1,20 @@
+{
+  "caseId": "incident-redis-timeout-cache",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "order-service checkout degraded because Redis command timed out and cache dependency span is slow. Diagnose whether source code repair is needed.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "alert": "fixtures/incident/redis-timeout-cache/alertmanager.json",
+    "prometheus": "fixtures/incident/redis-timeout-cache/prometheus.json",
+    "logs": "fixtures/incident/redis-timeout-cache/es-logs.json",
+    "trace": "fixtures/incident/redis-timeout-cache/skywalking-trace.json"
+  },
+  "expected": {
+    "serviceName": "order-service",
+    "endpoint": "POST /api/orders/submit",
+    "strategyType": "DEPENDENCY_INCIDENT",
+    "shouldEnterCodeRepair": false,
+    "rootCause": "Redis dependency timeout caused checkout degradation. The immediate action is cache dependency mitigation and observation, not direct code patching.",
+    "expectedNoCodePatch": true
+  }
+}

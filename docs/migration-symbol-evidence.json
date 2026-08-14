@@ -1,0 +1,2174 @@
+{
+  "AbstractArmorySupport": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/AbstractArmorySupport.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AbstractMultiThreadStrategyRouter": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/common/tree/AbstractMultiThreadStrategyRouter.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AbstractOpsAgentExecuteSupport": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/execute/AbstractOpsAgentExecuteSupport.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AgentBudget": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/runtime/AgentBudget.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentExecutionContext": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/runtime/AgentExecutionContext.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentExecutionStatus": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/runtime/AgentExecutionStatus.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentLoopDecision": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/loop/AgentLoopDecision.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentLoopEngineeringSkill": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/AgentLoopEngineeringSkill.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentLoopModelClient": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/loop/AgentLoopModelClient.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentLoopRequest": {
+    "target": "ops_autoagent.schemas:AgentLoopRequest",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/loop/AgentLoopRequest.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentLoopResult": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/loop/AgentLoopResult.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentLoopService": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/loop/AgentLoopService.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentLoopStep": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/loop/AgentLoopStep.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentLoopToolCall": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/loop/AgentLoopToolCall.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentLoopTraceItem": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/loop/AgentLoopTraceItem.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentPermissionPolicy": {
+    "target": "ops_autoagent.codeops.runtime:SecurityPolicy",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/security/AgentPermissionPolicy.java",
+    "rationale": "tool and mutation security policy",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/repository/AgentRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AgentRuntimeService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/runtime/AgentRuntimeService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AgentStepTrace": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/runtime/AgentStepTrace.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "AiAgentAutoConfigProperties": {
+    "target": "ops_autoagent.config:Settings",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-app/src/main/java/com/opsautoagent/config/AiAgentAutoConfigProperties.java",
+    "rationale": "typed environment configuration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiAgentAutoConfiguration": {
+    "target": "ops_autoagent.config:Settings",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-app/src/main/java/com/opsautoagent/config/AiAgentAutoConfiguration.java",
+    "rationale": "typed environment configuration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiAgentConfig": {
+    "target": "ops_autoagent.config:Settings",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-app/src/main/java/com/opsautoagent/config/AiAgentConfig.java",
+    "rationale": "typed environment configuration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiAgentEnumVO": {
+    "target": "ops_autoagent.schemas:ApiResponse",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/model/valobj/enums/AiAgentEnumVO.java",
+    "rationale": "Python typed/dictionary data contract serialized at the API/state boundary",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClient": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/AiClient.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientAdvisor": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/AiClientAdvisor.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientAdvisorNode": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/AiClientAdvisorNode.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientAdvisorTypeEnumVO": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/model/valobj/enums/AiClientAdvisorTypeEnumVO.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientAdvisorVO": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/model/valobj/AiClientAdvisorVO.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientApi": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/AiClientApi.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientApiNode": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/AiClientApiNode.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientApiVO": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/model/valobj/AiClientApiVO.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientConfig": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/AiClientConfig.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientLoadDataStrategy": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/business/data/impl/AiClientLoadDataStrategy.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientModel": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/AiClientModel.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientModelLoadDataStrategy": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/business/data/impl/AiClientModelLoadDataStrategy.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientModelNode": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/AiClientModelNode.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientModelVO": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/model/valobj/AiClientModelVO.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientNode": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/AiClientNode.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientRagOrder": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/AiClientRagOrder.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientSystemPrompt": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/AiClientSystemPrompt.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientSystemPromptVO": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/model/valobj/AiClientSystemPromptVO.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientToolMcp": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/AiClientToolMcp.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientToolMcpNode": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/AiClientToolMcpNode.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientToolMcpVO": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/model/valobj/AiClientToolMcpVO.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AiClientVO": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/model/valobj/AiClientVO.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AppException": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-types/src/main/java/com/opsautoagent/types/exception/AppException.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "Application": {
+    "target": "ops_autoagent.main:run",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-app/src/main/java/com/opsautoagent/Application.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "ArmoryCommandEntity": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/model/entity/ArmoryCommandEntity.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "AutoAgentRequestDTO": {
+    "target": "ops_autoagent.schemas:ApiResponse",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/AutoAgentRequestDTO.java",
+    "rationale": "Python typed/dictionary data contract serialized at the API/state boundary",
+    "verification": "tests/test_ops_services.py"
+  },
+  "BackgroundToolTaskEntity": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/BackgroundToolTaskEntity.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "BackgroundToolTaskService": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/task/BackgroundToolTaskService.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "BugFixSkill": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/BugFixSkill.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "BugFixSuggestionEntity": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/BugFixSuggestionEntity.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeContextPackEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/CodeContextPackEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeLocalizationAgentInput": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/localization/CodeLocalizationAgentInput.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeLocalizationAgentOutput": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/localization/CodeLocalizationAgentOutput.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeLocalizationAgentService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/localization/CodeLocalizationAgentService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsAgentLoopApplicationService": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/CodeOpsAgentLoopApplicationService.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsAgentLoopController": {
+    "target": "ops_autoagent.api:agent_loop",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/http/CodeOpsAgentLoopController.java",
+    "rationale": "FastAPI route implementation; route parity is audited",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsAgentLoopModelClient": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/llm/CodeOpsAgentLoopModelClient.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsAgentLoopRunRequestDTO": {
+    "target": "ops_autoagent.schemas:AgentLoopRequest",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsAgentLoopRunRequestDTO.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsAlertTriggerService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/CodeOpsAlertTriggerService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsApprovalDecisionRequestDTO": {
+    "target": "ops_autoagent.schemas:ApprovalDecision",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsApprovalDecisionRequestDTO.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsBugFixAgentInput": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/bugfix/CodeOpsBugFixAgentInput.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsBugFixAgentOutput": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/bugfix/CodeOpsBugFixAgentOutput.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsBugFixAgentService": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/bugfix/CodeOpsBugFixAgentService.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsCompatibleChatClient": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/llm/CodeOpsCompatibleChatClient.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsDashboardController": {
+    "target": "ops_autoagent.api:dashboard_overview",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/http/CodeOpsDashboardController.java",
+    "rationale": "FastAPI route implementation; route parity is audited",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsEvalCase": {
+    "target": "ops_autoagent.api:_evaluate_cases",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsEvalCase.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsEvalCaseReport": {
+    "target": "ops_autoagent.api:_evaluate_cases",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsEvalCaseReport.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsEvalMetricSummary": {
+    "target": "ops_autoagent.api:_evaluate_cases",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsEvalMetricSummary.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsEvalReport": {
+    "target": "ops_autoagent.api:_evaluate_cases",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsEvalReport.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsEvalReportBuilder": {
+    "target": "ops_autoagent.api:_evaluate_cases",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsEvalReportBuilder.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsEvalRun": {
+    "target": "ops_autoagent.api:_evaluate_cases",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsEvalRun.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsEvalStepReport": {
+    "target": "ops_autoagent.api:_evaluate_cases",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsEvalStepReport.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsEvalSummary": {
+    "target": "ops_autoagent.api:_evaluate_cases",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsEvalSummary.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsEvaluationController": {
+    "target": "ops_autoagent.api:run_codeops_evaluation",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/http/CodeOpsEvaluationController.java",
+    "rationale": "FastAPI route implementation; route parity is audited",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsEvaluationService": {
+    "target": "ops_autoagent.api:_evaluate_cases",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsEvaluationService.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsHookDecision": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/hook/CodeOpsHookDecision.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsHookEvent": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/hook/CodeOpsHookEvent.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsHookHandler": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/hook/CodeOpsHookHandler.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsHookResult": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/hook/CodeOpsHookResult.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsHookService": {
+    "target": "ops_autoagent.codeops.services:CodeOpsHookService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/hook/CodeOpsHookService.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsIncidentFixStageDTO": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsIncidentFixStageDTO.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsIncidentFixSubmitRequestDTO": {
+    "target": "ops_autoagent.schemas:IncidentFixRequest",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsIncidentFixSubmitRequestDTO.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsIncidentFixViewDTO": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsIncidentFixViewDTO.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsLocalizationEvalResult": {
+    "target": "ops_autoagent.api:_evaluate_cases",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsLocalizationEvalResult.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsReflectionReport": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsReflectionReport.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsReleaseRiskAgentInput": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/release/CodeOpsReleaseRiskAgentInput.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsReleaseRiskAgentOutput": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/release/CodeOpsReleaseRiskAgentOutput.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsReleaseRiskAgentService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/release/CodeOpsReleaseRiskAgentService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsReportMarkdownGenerator": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/CodeOpsReportMarkdownGenerator.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsReviewAgentInput": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/review/CodeOpsReviewAgentInput.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsReviewAgentOutput": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/review/CodeOpsReviewAgentOutput.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsReviewAgentService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/review/CodeOpsReviewAgentService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsSecurityGovernanceService": {
+    "target": "ops_autoagent.codeops.runtime:SecurityPolicy",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/security/CodeOpsSecurityGovernanceService.java",
+    "rationale": "tool and mutation security policy",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsSkillDTO": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsSkillDTO.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTaskController": {
+    "target": "ops_autoagent.api:submit_task",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/http/CodeOpsTaskController.java",
+    "rationale": "FastAPI route implementation; route parity is audited",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTaskDTO": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsTaskDTO.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTaskDagService": {
+    "target": "ops_autoagent.codeops.services:CodeOpsTaskDagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/task/CodeOpsTaskDagService.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTaskStepDTO": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsTaskStepDTO.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTaskSubmitRequestDTO": {
+    "target": "ops_autoagent.schemas:CodeOpsTaskRequest",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsTaskSubmitRequestDTO.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTaskTraceDTO": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsTaskTraceDTO.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTaskTraceStepDTO": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/CodeOpsTaskTraceStepDTO.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTestPatchAgentInput": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/testpatch/CodeOpsTestPatchAgentInput.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTestPatchAgentOutput": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/testpatch/CodeOpsTestPatchAgentOutput.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTestPatchAgentService": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/testpatch/CodeOpsTestPatchAgentService.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTestVerificationAgentInput": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/test/CodeOpsTestVerificationAgentInput.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTestVerificationAgentOutput": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/test/CodeOpsTestVerificationAgentOutput.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeOpsTestVerificationAgentService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/test/CodeOpsTestVerificationAgentService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "CodeSnippetEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/CodeSnippetEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "Constants": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-types/src/main/java/com/opsautoagent/types/common/Constants.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "ContextCompactionService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/compaction/ContextCompactionService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "DataSourceConfig": {
+    "target": "ops_autoagent.config:Settings",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-app/src/main/java/com/opsautoagent/config/DataSourceConfig.java",
+    "rationale": "typed environment configuration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "DefaultArmoryStrategyFactory": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/factory/DefaultArmoryStrategyFactory.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "DefaultOpsAgentExecuteStrategyFactory": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/execute/DefaultOpsAgentExecuteStrategyFactory.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "DefaultOpsChatClientResolver": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/chat/DefaultOpsChatClientResolver.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "DiagnosisRecordEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/DiagnosisRecordEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "ElkLogGateway": {
+    "target": "ops_autoagent.tools:ObservabilityTools",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/ops/ElkLogGateway.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "EngineeringKnowledgeMatchEntity": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/EngineeringKnowledgeMatchEntity.java",
+    "rationale": "BM25/PGVector/hybrid/rerank implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringKnowledgeRagSkill": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/EngineeringKnowledgeRagSkill.java",
+    "rationale": "BM25/PGVector/hybrid/rerank implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringKnowledgeSearchService": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/knowledge/EngineeringKnowledgeSearchService.java",
+    "rationale": "BM25/PGVector/hybrid/rerank implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringSkill": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/EngineeringSkill.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringSkillEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/EngineeringSkillEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringSkillRegistry": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/EngineeringSkillRegistry.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringSkillResultEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/EngineeringSkillResultEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringTaskAgentService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskAgentService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringTaskDagNodeEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/EngineeringTaskDagNodeEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringTaskEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/EngineeringTaskEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringTaskStepEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/EngineeringTaskStepEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringTaskTraceService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/service/EngineeringTaskTraceService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringToolDefinitionEntity": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/EngineeringToolDefinitionEntity.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringToolGateway": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/EngineeringToolGateway.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringToolHandler": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/EngineeringToolHandler.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringToolRegistry": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/EngineeringToolRegistry.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringToolRequest": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/EngineeringToolRequest.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EngineeringToolResult": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/EngineeringToolResult.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ErrorRecoveryPolicy": {
+    "target": "ops_autoagent.codeops.services:ErrorRecoveryPolicy",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/recovery/ErrorRecoveryPolicy.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EvidenceGraphBuilderService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/evidence/EvidenceGraphBuilderService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EvidenceGraphEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/EvidenceGraphEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "EvidenceItemEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/EvidenceItemEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "EvidenceSemanticEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/EvidenceSemanticEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "EvidenceSignalEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/EvidenceSignalEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "ExactReplaceBlockPatchEntity": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/ExactReplaceBlockPatchEntity.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "FailureDiagnosticEntity": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/FailureDiagnosticEntity.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "FailureDiagnosticParserService": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/recovery/FailureDiagnosticParserService.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "FileOpsRunbookGateway": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/ops/FileOpsRunbookGateway.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "FileRewritePatchEntity": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/FileRewritePatchEntity.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "FixStrategyRouterSkill": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/FixStrategyRouterSkill.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "GuavaConfig": {
+    "target": "ops_autoagent.config:Settings",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-app/src/main/java/com/opsautoagent/config/GuavaConfig.java",
+    "rationale": "typed environment configuration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "HistoricalIncidentMemoryEntity": {
+    "target": "ops_autoagent.ops.services:HistoricalMemoryService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/HistoricalIncidentMemoryEntity.java",
+    "rationale": "persistent recall and compaction behavior",
+    "verification": "tests/test_ops_services.py"
+  },
+  "HumanApprovalGate": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/security/HumanApprovalGate.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IAgentRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/adapter/repository/IAgentRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IAiClientAdvisorDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IAiClientAdvisorDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IAiClientApiDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IAiClientApiDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IAiClientConfigDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IAiClientConfigDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IAiClientDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IAiClientDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IAiClientModelDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IAiClientModelDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IAiClientRagOrderDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IAiClientRagOrderDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IAiClientSystemPromptDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IAiClientSystemPromptDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IAiClientToolMcpDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IAiClientToolMcpDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "ICodeOpsTaskService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/ICodeOpsTaskService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ILoadDataStrategy": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/business/data/ILoadDataStrategy.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsAgentRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/repository/IOpsAgentRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsAgentReviewDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsAgentReviewDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsAlertEventDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsAlertEventDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsAlertRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/repository/IOpsAlertRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsAlertWebhookService": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/IOpsAlertWebhookService.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsAuditLogDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsAuditLogDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsDiagnosisDispatchDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsDiagnosisDispatchDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsEmailGateway": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/gateway/IOpsEmailGateway.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsEvalCaseDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsEvalCaseDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsEvalMetricDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsEvalMetricDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsEvalRunDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsEvalRunDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsEvaluationRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/repository/IOpsEvaluationRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsGovernanceRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/repository/IOpsGovernanceRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsHistoricalIncidentMemoryDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsHistoricalIncidentMemoryDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsIncidentDiagnosisDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsIncidentDiagnosisDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsIncidentMemoryRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/repository/IOpsIncidentMemoryRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsIncidentRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/repository/IOpsIncidentRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsIncidentService": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/IOpsIncidentService.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsIncidentStateDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsIncidentStateDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsInvestigationPlanDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsInvestigationPlanDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsLogGateway": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/gateway/IOpsLogGateway.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsMcpToolGateway": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/gateway/IOpsMcpToolGateway.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsMetricGateway": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/gateway/IOpsMetricGateway.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsNotificationRecordDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsNotificationRecordDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsNotificationRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/repository/IOpsNotificationRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsRunbookGateway": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/gateway/IOpsRunbookGateway.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsRunbookKnowledgeGovernanceService": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/gateway/IOpsRunbookKnowledgeGovernanceService.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsServiceOwnerDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsServiceOwnerDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsToolCallLogDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsToolCallLogDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsToolPolicyDao": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/IOpsToolPolicyDao.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IOpsTraceGateway": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/adapter/gateway/IOpsTraceGateway.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IncidentCommandEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/IncidentCommandEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "IncidentDedupService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/scheduler/IncidentDedupService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IncidentEvidenceExtractor": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/evidence/IncidentEvidenceExtractor.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IncidentFixOrchestratorDecision": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorDecision.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IncidentFixOrchestratorPolicy": {
+    "target": "ops_autoagent.codeops.orchestrator:IncidentFixOrchestratorPolicy",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/orchestrator/IncidentFixOrchestratorPolicy.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IncidentFixWorkingMemory": {
+    "target": "ops_autoagent.codeops.services:IncidentMemoryService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/IncidentFixWorkingMemory.java",
+    "rationale": "persistent recall and compaction behavior",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IncidentFixtureEvidence": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/fixture/IncidentFixtureEvidence.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IncidentFixtureEvidenceService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/fixture/IncidentFixtureEvidenceService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IncidentMemoryService": {
+    "target": "ops_autoagent.codeops.services:IncidentMemoryService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/memory/IncidentMemoryService.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IncidentPriorityQueue": {
+    "target": "ops_autoagent.codeops.services:IncidentScheduler",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/scheduler/IncidentPriorityQueue.java",
+    "rationale": "persistent prioritized incident scheduler",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IncidentRegressionScaffoldService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/test/IncidentRegressionScaffoldService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "IncidentScheduler": {
+    "target": "ops_autoagent.codeops.services:IncidentScheduler",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/scheduler/IncidentScheduler.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "LlmCostControlService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/llm/LlmCostControlService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "LogEvidenceEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/LogEvidenceEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "MetricEvidenceEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/MetricEvidenceEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "MockCodeOpsAgentLoopModelClient": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/llm/MockCodeOpsAgentLoopModelClient.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ModelRouter": {
+    "target": "ops_autoagent.codeops.services:ModelRouter",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/llm/ModelRouter.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "OpsAgentBootstrapService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/OpsAgentBootstrapService.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAgentPlanExecutionService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/plan/OpsAgentPlanExecutionService.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAgentPlannerService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/plan/OpsAgentPlannerService.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAgentRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/repository/OpsAgentRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAgentReview": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsAgentReview.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAgentSkill": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/skill/OpsAgentSkill.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAgentSkillService": {
+    "target": "ops_autoagent.ops.skills:OpsAgentSkillService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/skill/OpsAgentSkillService.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAgentStateService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/state/OpsAgentStateService.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertDedupDecision": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/valobj/alert/OpsAlertDedupDecision.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertDedupService": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/alert/OpsAlertDedupService.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertEvent": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsAlertEvent.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertEventEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/OpsAlertEventEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertIngestResult": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/valobj/alert/OpsAlertIngestResult.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertIngestService": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/alert/OpsAlertIngestService.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertNormalizeService": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/alert/OpsAlertNormalizeService.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/repository/OpsAlertRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertWebhookAcceptDTO": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/OpsAlertWebhookAcceptDTO.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertWebhookAlertDTO": {
+    "target": "ops_autoagent.schemas:Alert",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/OpsAlertWebhookAlertDTO.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertWebhookController": {
+    "target": "ops_autoagent.api:alertmanager",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/http/OpsAlertWebhookController.java",
+    "rationale": "FastAPI route implementation; route parity is audited",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAlertWebhookRequestDTO": {
+    "target": "ops_autoagent.schemas:AlertmanagerWebhook",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/OpsAlertWebhookRequestDTO.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAnalyzeEventEntity": {
+    "target": "ops_autoagent.schemas:ApiResponse",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/OpsAnalyzeEventEntity.java",
+    "rationale": "Python typed/dictionary data contract serialized at the API/state boundary",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsApiGuard": {
+    "target": "ops_autoagent.api:api_guard",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/http/OpsApiGuard.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAuditLog": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsAuditLog.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsAuditLogEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/OpsAuditLogEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsChatAgentAdapter": {
+    "target": "ops_autoagent.ops.chat:OpsMultiChatAgentService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/chat/OpsChatAgentAdapter.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsChatAgentDefinition": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/chat/OpsChatAgentDefinition.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsChatAgentInput": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/chat/OpsChatAgentInput.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsChatAgentOutput": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/chat/OpsChatAgentOutput.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsChatAgentRole": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/chat/OpsChatAgentRole.java",
+    "rationale": "dynamic ai_client graph and role-specific client resolution",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsChatClientResolution": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolution",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/chat/OpsChatClientResolution.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsChatClientResolver": {
+    "target": "ops_autoagent.ops.chat:OpsChatClientResolver",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/chat/OpsChatClientResolver.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsDemoDataAutoSeeder": {
+    "target": "ops_autoagent.ops.demo:OpsDemoDataAutoSeeder",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/job/OpsDemoDataAutoSeeder.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsDiagnosisDispatch": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsDiagnosisDispatch.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsDiagnosisDispatchEntity": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/OpsDiagnosisDispatchEntity.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsDiagnosisDispatchService": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/dispatch/OpsDiagnosisDispatchService.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsDiagnosisEngineeringSkill": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/OpsDiagnosisEngineeringSkill.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "OpsDiagnosisJobExecutor": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/dispatch/OpsDiagnosisJobExecutor.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsDiagnosisSkillResultEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/OpsDiagnosisSkillResultEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "OpsEmailGateway": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/OpsEmailGateway.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvalCase": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsEvalCase.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvalMetric": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsEvalMetric.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvalRun": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsEvalRun.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvaluationController": {
+    "target": "ops_autoagent.api:run_ops_evaluation",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/http/OpsEvaluationController.java",
+    "rationale": "FastAPI route implementation; route parity is audited",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvaluationRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/repository/OpsEvaluationRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvaluationService": {
+    "target": "ops_autoagent.api:_ops_fixture_summary",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/eval/OpsEvaluationService.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvaluationSummary": {
+    "target": "ops_autoagent.api:_ops_fixture_summary",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/eval/OpsEvaluationSummary.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvidenceReviewResult": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/review/OpsEvidenceReviewResult.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvidenceReviewerService": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/review/OpsEvidenceReviewerService.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvidenceSignalExtractor": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/evidence/OpsEvidenceSignalExtractor.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvidenceSufficiency": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/review/OpsEvidenceSufficiency.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsEvidenceVerificationController": {
+    "target": "ops_autoagent.api:verify_full_chain",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/http/OpsEvidenceVerificationController.java",
+    "rationale": "FastAPI route implementation; route parity is audited",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsGovernanceRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/repository/OpsGovernanceRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsHistoricalIncidentMemory": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsHistoricalIncidentMemory.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsHistoricalIncidentMemoryService": {
+    "target": "ops_autoagent.ops.services:HistoricalMemoryService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/memory/OpsHistoricalIncidentMemoryService.java",
+    "rationale": "persistent recall and compaction behavior",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentAnalyzeRequestDTO": {
+    "target": "ops_autoagent.schemas:IncidentAnalyzeRequest",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/OpsIncidentAnalyzeRequestDTO.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentCommandFactory": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/dispatch/OpsIncidentCommandFactory.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentController": {
+    "target": "ops_autoagent.api:analyze_incident",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/http/OpsIncidentController.java",
+    "rationale": "FastAPI route implementation; route parity is audited",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentDiagnosis": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsIncidentDiagnosis.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentDiagnosisRecordDTO": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/dto/OpsIncidentDiagnosisRecordDTO.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentExecuteStrategy": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/OpsIncidentExecuteStrategy.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentMemoryRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/repository/OpsIncidentMemoryRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/repository/OpsIncidentRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentState": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsIncidentState.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentWorkingMemory": {
+    "target": "ops_autoagent.ops.services:HistoricalMemoryService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/memory/OpsIncidentWorkingMemory.java",
+    "rationale": "persistent recall and compaction behavior",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsIncidentWorkingMemoryService": {
+    "target": "ops_autoagent.ops.services:HistoricalMemoryService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/memory/OpsIncidentWorkingMemoryService.java",
+    "rationale": "persistent recall and compaction behavior",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsInvestigationPlan": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsInvestigationPlan.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsMcpToolGateway": {
+    "target": "ops_autoagent.tools:McpHttpClient",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/ops/OpsMcpToolGateway.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsMcpToolResultEntity": {
+    "target": "ops_autoagent.ops.services:ToolGovernance",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/OpsMcpToolResultEntity.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsMemoryToolchainEvaluationSummary": {
+    "target": "ops_autoagent.api:_ops_fixture_summary",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/eval/OpsMemoryToolchainEvaluationSummary.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsMockFaultController": {
+    "target": "ops_autoagent.api:mock_health",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-trigger/src/main/java/com/opsautoagent/trigger/http/OpsMockFaultController.java",
+    "rationale": "FastAPI route implementation; route parity is audited",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsMultiChatAgentService": {
+    "target": "ops_autoagent.ops.chat:OpsMultiChatAgentService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/chat/OpsMultiChatAgentService.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsNotificationRecord": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsNotificationRecord.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsNotificationRecordEntity": {
+    "target": "ops_autoagent.schemas:ApiResponse",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/OpsNotificationRecordEntity.java",
+    "rationale": "Python typed/dictionary data contract serialized at the API/state boundary",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsNotificationRepository": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/repository/OpsNotificationRepository.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsNotificationService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/notify/OpsNotificationService.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsNotificationTemplateService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/notify/OpsNotificationTemplateService.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsRootNode": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/execute/OpsRootNode.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsRunbookHypothesisGenerator": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/evidence/OpsRunbookHypothesisGenerator.java",
+    "rationale": "BM25/PGVector/hybrid/rerank implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsRunbookKnowledgeGovernanceService": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/ops/OpsRunbookKnowledgeGovernanceService.java",
+    "rationale": "BM25/PGVector/hybrid/rerank implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsRunbookMarkdownChunker": {
+    "target": "ops_autoagent.ops.rag:MarkdownChunker",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/ops/OpsRunbookMarkdownChunker.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsRunbookRagEvalCase": {
+    "target": "ops_autoagent.api:_ops_fixture_summary",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/eval/OpsRunbookRagEvalCase.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsRunbookRagEvalRun": {
+    "target": "ops_autoagent.api:_ops_fixture_summary",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/eval/OpsRunbookRagEvalRun.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsRunbookRagEvaluationService": {
+    "target": "ops_autoagent.api:_ops_fixture_summary",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/eval/OpsRunbookRagEvaluationService.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsRunbookRagEvaluationSummary": {
+    "target": "ops_autoagent.api:_ops_fixture_summary",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/eval/OpsRunbookRagEvaluationSummary.java",
+    "rationale": "real graph evaluation harness",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsRunbookVectorIndexer": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/ops/OpsRunbookVectorIndexer.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsSensitiveDataMasker": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/OpsSensitiveDataMasker.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsServiceOwner": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsServiceOwner.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsServiceOwnerEntity": {
+    "target": "ops_autoagent.schemas:ApiResponse",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/OpsServiceOwnerEntity.java",
+    "rationale": "Python typed/dictionary data contract serialized at the API/state boundary",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsServiceOwnerService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/notify/OpsServiceOwnerService.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsStep1IncidentIntentNode": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/execute/OpsStep1IncidentIntentNode.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsStep2PrometheusMetricNode": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/execute/OpsStep2PrometheusMetricNode.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsStep3ElkLogNode": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/execute/OpsStep3ElkLogNode.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsStep4SkyWalkingTraceNode": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/execute/OpsStep4SkyWalkingTraceNode.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsStep5EvidenceCorrelationNode": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/execute/OpsStep5EvidenceCorrelationNode.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsStep6RootCauseAnalysisNode": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/execute/OpsStep6RootCauseAnalysisNode.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsStep7ReportGenerationNode": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/service/execute/OpsStep7ReportGenerationNode.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsToolCallLog": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsToolCallLog.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsToolCallLogEntity": {
+    "target": "ops_autoagent.ops.services:ToolGovernance",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/OpsToolCallLogEntity.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsToolGovernanceDecision": {
+    "target": "ops_autoagent.ops.services:ToolGovernance",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/governance/OpsToolGovernanceDecision.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsToolGovernanceService": {
+    "target": "ops_autoagent.ops.services:ToolGovernance",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/governance/OpsToolGovernanceService.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_ops_services.py"
+  },
+  "OpsToolPolicy": {
+    "target": "ops_autoagent.store:Store",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/dao/po/OpsToolPolicy.java",
+    "rationale": "consolidated async persistence adapter with legacy MySQL dual-write/read",
+    "verification": "tests/test_ops_services.py"
+  },
+  "PatchApplyResult": {
+    "target": "ops_autoagent.codeops.runtime:PatchSandbox",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/PatchApplyResult.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PatchApplyService": {
+    "target": "ops_autoagent.codeops.runtime:PatchSandbox",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/PatchApplyService.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PatchAttemptEntity": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/PatchAttemptEntity.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PatchDiffAnalysisResult": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/PatchDiffAnalysisResult.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PatchDiffAnalysisService": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/PatchDiffAnalysisService.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PatchSandboxService": {
+    "target": "ops_autoagent.codeops.runtime:PatchSandbox",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/PatchSandboxService.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PatchSandboxWorkspace": {
+    "target": "ops_autoagent.codeops.runtime:PatchSandbox",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/PatchSandboxWorkspace.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PatchScopeGuardResult": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/PatchScopeGuardResult.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PatchScopeGuardService": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/PatchScopeGuardService.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PatchValidationResult": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/PatchValidationResult.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PatchValidationService": {
+    "target": "ops_autoagent.codeops.runtime:PatchProposal",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/patch/PatchValidationService.java",
+    "rationale": "structured patch/sandbox/validation pipeline",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PgVectorOpsRunbookGateway": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/ops/PgVectorOpsRunbookGateway.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "PrReviewSkill": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/PrReviewSkill.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "PrometheusMetricGateway": {
+    "target": "ops_autoagent.tools:ObservabilityTools",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/ops/PrometheusMetricGateway.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "RagAnswerAdvisor": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/factory/element/RagAnswerAdvisor.java",
+    "rationale": "BM25/PGVector/hybrid/rerank implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "RecoveryDecision": {
+    "target": "ops_autoagent.codeops.services:AgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/recovery/RecoveryDecision.java",
+    "rationale": "bounded engineering agent loop and recovery",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ReleaseRiskReportEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/ReleaseRiskReportEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ReleaseRiskSkill": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/ReleaseRiskSkill.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "RepairAgentLoopRequest": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/repair/RepairAgentLoopRequest.java",
+    "rationale": "BM25/PGVector/hybrid/rerank implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "RepairAgentLoopService": {
+    "target": "ops_autoagent.codeops.services:RepairAgentLoopService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/repair/RepairAgentLoopService.java",
+    "rationale": "same-named Python implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "RepairObservationEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/RepairObservationEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "RepairObservationService": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/repair/RepairObservationService.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "RepoDiffContextEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/RepoDiffContextEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "RepoDiffHunkEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/RepoDiffHunkEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "RepoUnderstandingSkill": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/RepoUnderstandingSkill.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ReportArtifacts": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/eval/ReportArtifacts.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "Response": {
+    "target": "ops_autoagent.schemas:ApiResponse",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-api/src/main/java/com/opsautoagent/api/response/Response.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "ResponseCode": {
+    "target": "ops_autoagent.schemas:ApiResponse",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-types/src/main/java/com/opsautoagent/types/enums/ResponseCode.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "ReviewFindingEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/ReviewFindingEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "RootCauseCandidateEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/RootCauseCandidateEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "RootNode": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/agent/service/armory/RootNode.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "RunbookCrossEncoderReranker": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/ops/RunbookCrossEncoderReranker.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "RunbookMatchEntity": {
+    "target": "ops_autoagent.ops.rag:RunbookRagService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/RunbookMatchEntity.java",
+    "rationale": "BM25/PGVector/hybrid/rerank implementation",
+    "verification": "tests/test_ops_services.py"
+  },
+  "SkyWalkingTraceGateway": {
+    "target": "ops_autoagent.tools:ObservabilityTools",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-infrastructure/src/main/java/com/opsautoagent/infrastructure/adapter/gateway/ops/SkyWalkingTraceGateway.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "SourceWriteSafetyHookHandler": {
+    "target": "ops_autoagent.codeops.runtime:SecurityPolicy",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/hook/SourceWriteSafetyHookHandler.java",
+    "rationale": "tool and mutation security policy",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "SpringAiOpsChatAgentAdapter": {
+    "target": "ops_autoagent.ops.chat:OpsMultiChatAgentService",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/agent/chat/SpringAiOpsChatAgentAdapter.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "StrategyHandler": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/common/tree/StrategyHandler.java",
+    "rationale": "framework abstraction collapsed into executable LangGraph orchestration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "TaskNotificationEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/TaskNotificationEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "TestVerificationPlanEntity": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/model/entity/TestVerificationPlanEntity.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "TestVerificationSkill": {
+    "target": "ops_autoagent.graphs.codeops:CodeOpsGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/skill/TestVerificationSkill.java",
+    "rationale": "consolidated typed CodeOps LangGraph state/node implementation",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ThreadPoolConfig": {
+    "target": "ops_autoagent.executors:CallerRunsBoundedExecutor",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-app/src/main/java/com/opsautoagent/config/ThreadPoolConfig.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "ThreadPoolConfigProperties": {
+    "target": "ops_autoagent.config:Settings",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-app/src/main/java/com/opsautoagent/config/ThreadPoolConfigProperties.java",
+    "rationale": "explicit behavior-level migration",
+    "verification": "tests/test_ops_services.py"
+  },
+  "ToolAccessLevel": {
+    "target": "ops_autoagent.codeops.runtime:SecurityPolicy",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/ToolAccessLevel.java",
+    "rationale": "tool and mutation security policy",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ToolExecutionRecord": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/ToolExecutionRecord.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ToolExecutionStatus": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/ToolExecutionStatus.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ToolPermissionDecision": {
+    "target": "ops_autoagent.codeops.runtime:SecurityPolicy",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/ToolPermissionDecision.java",
+    "rationale": "tool and mutation security policy",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ToolPermissionGate": {
+    "target": "ops_autoagent.codeops.runtime:SecurityPolicy",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/ToolPermissionGate.java",
+    "rationale": "tool and mutation security policy",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ToolRuntimeService": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/ToolRuntimeService.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "ToolSourceType": {
+    "target": "ops_autoagent.codeops.runtime:EngineeringToolGateway",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/codeops/agent/tool/ToolSourceType.java",
+    "rationale": "governed named tool runtime",
+    "verification": "tests/test_codeops_runtime.py"
+  },
+  "TraceEvidenceEntity": {
+    "target": "ops_autoagent.graphs.ops:OpsDiagnosisGraph",
+    "legacyFile": "legacy-spring-ai/ops-autoagent-domain/src/main/java/com/opsautoagent/domain/ops/model/entity/TraceEvidenceEntity.java",
+    "rationale": "consolidated typed Ops LangGraph state/node implementation",
+    "verification": "tests/test_ops_services.py"
+  }
+}

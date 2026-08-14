@@ -1,0 +1,38 @@
+{
+  "traceId": "trace-db-pool-001",
+  "service": "order-service",
+  "endpoint": "POST /api/orders/submit",
+  "spans": [
+    {
+      "spanId": 1,
+      "operation": "HTTP POST /api/orders/submit",
+      "durationMs": 30221,
+      "status": "ERROR"
+    },
+    {
+      "spanId": 2,
+      "parentSpanId": 1,
+      "operation": "DataSource.getConnection",
+      "durationMs": 30000,
+      "status": "ERROR",
+      "tags": {
+        "db.pool": "order-primary",
+        "pool.active": "30",
+        "pool.max": "30",
+        "pool.pending": "86",
+        "error.kind": "connection_timeout"
+      }
+    },
+    {
+      "spanId": 3,
+      "parentSpanId": 1,
+      "operation": "SELECT order_inventory",
+      "durationMs": 18,
+      "status": "OK",
+      "tags": {
+        "db.statement.category": "inventory_query",
+        "slow.sql": "false"
+      }
+    }
+  ]
+}
