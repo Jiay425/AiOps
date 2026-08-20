@@ -1,8 +1,31 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import dotenv_values
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_OPTIONAL_ENV_FILE_VARIABLE = "OPS_AUTOAGENT_ENV_FILE"
+
+
+def _load_optional_env_file() -> None:
+    """Load an explicitly selected local secret file without committing it.
+
+    The default remains the repository's ``.env``.  A developer or deployment
+    process may opt in to another file with ``OPS_AUTOAGENT_ENV_FILE``; process
+    environment variables retain precedence over values from that file.
+    """
+    configured = os.environ.get(_OPTIONAL_ENV_FILE_VARIABLE, "").strip()
+    if not configured:
+        return
+    path = Path(configured).expanduser()
+    if not path.is_file():
+        raise RuntimeError(f"{_OPTIONAL_ENV_FILE_VARIABLE} does not reference a readable file")
+    for key, value in dotenv_values(path).items():
+        if key and value is not None:
+            os.environ.setdefault(str(key), str(value))
 
 
 class Settings(BaseSettings):
@@ -150,11 +173,23 @@ class Settings(BaseSettings):
     codeops_patch_sandbox_base_dir: str = ""
     codeops_patch_sandbox_prefer_git_worktree: bool = False
     codeops_patch_sandbox_timeout_ms: int = 30000
-    codeops_llm_flash_model: str = ""
-    codeops_llm_pro_model: str = ""
+    codeops_llm_flash_model: str = Field(
+        "", validation_alias=AliasChoices("CODEOPS_LLM_FLASH_MODEL", "CODEOPS_MODEL_FLASH"))
+    codeops_llm_pro_model: str = Field(
+        "", validation_alias=AliasChoices("CODEOPS_LLM_PRO_MODEL", "CODEOPS_MODEL_PRO"))
+    codeops_llm_timeout_seconds: float = 120.0
+    codeops_llm_max_output_tokens: int = 2048
+    codeops_llm_agent_loop_max_output_tokens: int = 4096
+    codeops_llm_empty_content_retries: int = 2
+    codeops_llm_structured_output_retries: int = 1
+    codeops_llm_prompt_max_chars: int = 32000
+    codeops_llm_thinking_type: str = Field(
+        "disabled", validation_alias=AliasChoices("CODEOPS_LLM_THINKING_TYPE"))
     codeops_llm_pro_escalation_enabled: bool = False
     codeops_test_execution_enabled: bool = False
     codeops_test_execution_timeout_ms: int = 120000
+    codeops_java_home: str = ""
+    codeops_eval_skip_previously_successful: bool = True
     codeops_agent_test_verification_llm_enabled: bool = True
     codeops_agent_test_patch_llm_enabled: bool = True
     codeops_agent_test_patch_max_snippets: int = 4
@@ -167,8 +202,24 @@ class Settings(BaseSettings):
     codeops_incident_to_fix_alert_enabled: bool = True
     codeops_scheduler_max_concurrent: int = 3
     codeops_scheduler_max_per_service: int = 1
+    codeops_hitl_approval_enabled: bool = True
+    codeops_apply_mode: str = "delivery_only"
+    codeops_read_only_agent_tools: bool = True
+    codeops_event_stream_enabled: bool = False
+    codeops_max_repair_attempts: int = 3
+    codeops_subgraphs_enabled: bool = True
+    codeops_independent_reviewer_enabled: bool = True
+    codeops_reviewer_retry_enabled: bool = False
+    codeops_shadow_reviewer_enabled: bool = False
+    codeops_gray_retry_enabled: bool = False
+    codeops_gray_apply_enabled: bool = False
+    codeops_runtime_metrics_enabled: bool = True
+    codeops_runtime_evaluation_enabled: bool = True
+    ops_parallel_evidence_enabled: bool = False
+    langgraph_state_schema_version: int = 2
 
 
 @lru_cache
 def get_settings() -> Settings:
+    _load_optional_env_file()
     return Settings()

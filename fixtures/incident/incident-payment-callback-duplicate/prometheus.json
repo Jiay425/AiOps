@@ -1,0 +1,9 @@
+{
+  "dataClass": "TEST_SIMULATED_DATA",
+  "service": "order-service",
+  "metrics": [
+    {"name": "payment_webhook_duplicate_total", "query": "increase(payment_webhook_duplicate_total{service=\"order-service\"}[5m])", "value": 87, "unit": "count"},
+    {"name": "payment_webhook_retry_total", "query": "increase(payment_webhook_retry_total{gateway=\"payment-gateway\"}[5m])", "value": 91, "unit": "count"},
+    {"name": "http_5xx_rate_percent", "query": "sum(rate(http_server_requests_seconds_count{service=\"order-service\",status=~\"5..\"}[5m]))", "value": 0.1, "unit": "percent"}
+  ]
+}

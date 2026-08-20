@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","logs":[{"level":"ERROR","traceId":"eval-coupon-001","message":"couponId=coupon-1 redeemed twice for requestId=req-1","stack":["at com.example.order.CouponRedemptionService.redeem(CouponRedemptionService.java:13)","at com.example.order.IdempotencyService.markProcessed(IdempotencyService.java:14)"]}]}

@@ -44,3 +44,20 @@ class CheckpointerManager:
         return {"backend": self.backend, "persistent": self.backend in {"sqlite", "postgres"},
                 "path": str(self.settings.langgraph_checkpoint_path) if self.backend == "sqlite" else "",
                 "postgresConfigured": bool(self.settings.langgraph_checkpoint_postgres_url)}
+
+    async def checkpoint_summary(self, graph: Any, thread_id: str) -> dict[str, Any]:
+        """Return a deliberately restricted checkpoint diagnostic for API reconciliation."""
+        config = {"configurable": {"thread_id": thread_id}}
+        snapshot = await graph.aget_state(config)
+        values = snapshot.values if snapshot else {}
+        interrupts = getattr(snapshot, "tasks", ()) if snapshot else ()
+        approval = values.get("approval", {}) if isinstance(values, dict) else {}
+        return {
+            "threadId": thread_id,
+            "checkpointPresent": bool(snapshot and values),
+            "currentNode": str(getattr(snapshot, "next", ()) or ""),
+            "status": str(values.get("status", "")) if isinstance(values, dict) else "",
+            "approvalId": approval.get("approvalId") if isinstance(approval, dict) else None,
+            "approvalStatus": approval.get("status") if isinstance(approval, dict) else None,
+            "interruptPending": bool(interrupts),
+        }

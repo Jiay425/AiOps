@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","logs":[{"level":"WARN","traceId":"eval-scope-001","message":"repair candidate touched PaymentClient although only OrderSubmitService is authorized","stack":["at com.example.order.OrderSubmitService.submitFlashSale(OrderSubmitService.java:14)"]}]}

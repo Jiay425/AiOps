@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","metrics":[{"name":"client_retry_duplicate_order_total","value":14,"unit":"count"},{"name":"request_timeout_total","value":22,"unit":"count"}]}

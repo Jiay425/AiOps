@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","metrics":[{"name":"duplicate_order_request_total","value":19,"unit":"count"},{"name":"order_submit_5xx_rate","value":0.08,"unit":"ratio"}]}

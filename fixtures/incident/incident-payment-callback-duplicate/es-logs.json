@@ -1,0 +1,8 @@
+{
+  "dataClass": "TEST_SIMULATED_DATA",
+  "index": "order-service-*",
+  "hits": [
+    {"timestamp": "2026-08-15T18:30:00+08:00", "level": "WARN", "service": "order-service", "message": "duplicate webhook callbackId=cb-test-1042 source=payment-gateway deliveryAttempt=2", "traceId": "trace-payment-duplicate-1042"},
+    {"timestamp": "2026-08-15T18:30:01+08:00", "level": "INFO", "service": "order-service", "message": "callbackId=cb-test-1042 was delivered twice within 800ms", "traceId": "trace-payment-duplicate-1042"}
+  ]
+}

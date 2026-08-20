@@ -47,17 +47,14 @@ class CodeOpsHookService:
             raise ValueError(f"Unknown CodeOps hook event: {event}")
         decisions = []
         if event == "BEFORE_TOOL_USE" and (payload or {}).get("toolName") == "repo.exact_replace":
-            arguments = (payload or {}).get("arguments")
-            path = str(arguments.get("filePath", "")).replace("\\", "/") if isinstance(arguments, dict) else ""
-            if not path or ".." in path or path.startswith("/"):
-                decisions.append({"handler": "source_write_safety", "allowed": False,
-                                  "requiresApproval": False, "reason": "repo.exact_replace filePath escapes repository"})
-            elif not path.startswith("src/"):
-                decisions.append({"handler": "source_write_safety", "allowed": False,
-                                  "requiresApproval": False, "reason": "repo.exact_replace is limited to repository src/** files"})
-            else:
-                decisions.append({"handler": "source_write_safety", "allowed": True,
-                                  "requiresApproval": False, "reason": "source write target passed hook safety policy"})
+            arguments = (payload or {}).get("arguments") or {}
+            repository = arguments.get("repository", ".")
+            file_path = str(arguments.get("filePath", ""))
+            allowed = SecurityPolicy.is_write_allowed(repository, file_path, source_only=True)
+            decisions.append({"handler": "source_write_safety", "allowed": allowed,
+                              "requiresApproval": False,
+                              "reason": "repo.exact_replace is disabled outside apply_approved_patch"
+                              if not allowed else "legacy hook validation passed; mutation remains effect-node-only"})
         requires_approval = any(item.get("requiresApproval") for item in decisions)
         allowed = not requires_approval and all(item.get("allowed", True) for item in decisions)
         reason = next((item.get("reason", "") for item in decisions if not item.get("allowed", True)), "")
@@ -72,8 +69,35 @@ class CodeOpsHookService:
 
 
 class AgentLoopService:
+    READ_ONLY_TOOLS = {
+        "repo.create_snapshot", "repo.search_text", "repo.list_files", "repo.read_file_snippet",
+        "repo.git_diff", "repo.git_log", "repo.find_tests", "knowledge.search",
+        "task.background_status",
+    }
+
     def __init__(self, gateway: EngineeringToolGateway):
         self.gateway = gateway
+
+    @staticmethod
+    def _normalize_tool_arguments(tool_name: str, arguments: dict[str, Any], repository: Any) -> dict[str, Any]:
+        """Normalize model paths without widening the repository security boundary."""
+        normalized = dict(arguments or {})
+        if tool_name.startswith("repo.") and not str(normalized.get("repository") or "").strip():
+            normalized["repository"] = repository
+        if tool_name != "repo.read_file_snippet":
+            return normalized
+        file_path = str(normalized.get("filePath") or "").strip()
+        if not file_path:
+            return normalized
+        root = Path(str(normalized.get("repository") or ".")).resolve()
+        candidate = Path(file_path)
+        if not candidate.is_absolute():
+            return normalized
+        try:
+            normalized["filePath"] = candidate.resolve().relative_to(root).as_posix()
+        except ValueError as exc:
+            raise PermissionError("Absolute read path is outside the target repository") from exc
+        return normalized
 
     async def run(self, request: dict[str, Any], model_client: Callable[[dict[str, Any], list[dict[str, Any]]], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
         requested_turns = int(request.get("maxTurns") or 0)
@@ -102,9 +126,20 @@ class AgentLoopService:
                     return self._result("COMPLETED", "", "no_tool_calls", turn, steps)
                 for call in calls:
                     started = now_iso()
-                    name, arguments = str(call.get("toolName", "")), dict(call.get("arguments") or {})
+                    name = str(call.get("toolName", ""))
                     try:
-                        if not self.gateway.is_registered_tool(name):
+                        arguments = self._normalize_tool_arguments(name, dict(call.get("arguments") or {}),
+                                                                  request.get("repository"))
+                    except PermissionError as exc:
+                        arguments = dict(call.get("arguments") or {})
+                        tool_result = {"status": "DENIED", "success": False, "summary": str(exc), "output": None}
+                        steps.append({"turnNo": turn, "toolCallId": call.get("toolCallId", str(uuid.uuid4())),
+                                      "toolName": name, "arguments": arguments,
+                                      "permissionDecision": {"status": "DENIED"}, "toolResult": tool_result,
+                                      "startedAt": started, "finishedAt": now_iso()})
+                        return self._result(tool_result["status"], "", tool_result["summary"], turn, steps)
+                    try:
+                        if name not in self.READ_ONLY_TOOLS or not self.gateway.is_registered_tool(name):
                             raise PermissionError(f"Unknown tool: {name}")
                         output = await self.gateway.invoke(name, arguments, budget=budget)
                         tool_result = {"status": "SUCCESS", "success": True, "summary": self.gateway._summary(output), "output": output}
@@ -117,6 +152,10 @@ class AgentLoopService:
                                   "permissionDecision": {"status": "ALLOWED" if tool_result["status"] != "DENIED" else "DENIED"},
                                   "toolResult": tool_result, "startedAt": started, "finishedAt": now_iso()})
                     if tool_result["status"] in {"DENIED", "REQUIRES_APPROVAL"}:
+                        # A malformed read-only call is recoverable model feedback. Let the next
+                        # turn correct its path/arguments; mutation and approval denials remain terminal.
+                        if tool_result["status"] == "DENIED" and name in self.READ_ONLY_TOOLS:
+                            continue
                         return self._result(tool_result["status"], "", tool_result["summary"], turn, steps)
             return self._result("MAX_TURNS_REACHED", "", f"agent loop reached maxTurns={max_turns}", max_turns, steps)
         finally:

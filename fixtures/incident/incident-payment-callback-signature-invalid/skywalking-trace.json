@@ -1,0 +1,8 @@
+{
+  "dataClass": "TEST_SIMULATED_DATA",
+  "traceId": "trace-payment-signature-2048",
+  "spans": [
+    {"service": "payment-gateway", "operation": "POST /webhooks/payment", "durationMs": 31, "tags": {"key-version": "v2026-08"}},
+    {"service": "order-service", "operation": "verifyPaymentCallback", "durationMs": 4, "error": true, "tags": {"result": "signature-invalid", "configured-key-version": "v2026-07"}}
+  ]
+}

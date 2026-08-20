@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","logs":[{"level":"ERROR","traceId":"eval-validation-001","message":"NullPointerException userId is null before validation; quantity=0 unitPrice=0","stack":["at com.example.order.OrderController.submitHttp(OrderController.java:5)","at com.example.order.OrderSubmitRequest.validate(OrderSubmitRequest.java:7)"]}]}

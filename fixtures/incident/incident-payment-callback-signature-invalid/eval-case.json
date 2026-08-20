@@ -1,0 +1,18 @@
+{
+  "caseId": "incident-payment-callback-signature-invalid",
+  "dataClass": "TEST_SIMULATED_DATA",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "TEST_SIMULATED_DATA: payment callback signature validation failures began immediately after a payment-gateway key version rotation.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "prometheus": "fixtures/incident/incident-payment-callback-signature-invalid/prometheus.json",
+    "logs": "fixtures/incident/incident-payment-callback-signature-invalid/es-logs.json",
+    "trace": "fixtures/incident/incident-payment-callback-signature-invalid/skywalking-trace.json"
+  },
+  "expected": {
+    "strategyType": "PAYMENT_GATEWAY_KEY_CONFIGURATION",
+    "shouldEnterCodeRepair": false,
+    "rootCause": "payment-gateway sent key-version v2026-08 while the configured verification secret remained v2026-07; rotate or roll back the gateway configuration under dual-key observation.",
+    "expectedNoCodePatch": true
+  }
+}

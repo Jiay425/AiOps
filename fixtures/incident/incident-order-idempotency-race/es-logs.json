@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","logs":[{"level":"ERROR","traceId":"eval-idem-001","message":"duplicate requestId=req-1 created two orders","stack":["at com.example.order.OrderSubmitService.submitFlashSale(OrderSubmitService.java:14)","at com.example.order.IdempotencyService.alreadyProcessed(IdempotencyService.java:10)"]}]}

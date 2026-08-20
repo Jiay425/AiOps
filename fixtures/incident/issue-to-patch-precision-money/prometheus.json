@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","metrics":[{"name":"money_rounding_mismatch_total","value":23,"unit":"count"},{"name":"payment_reconciliation_error_rate","value":0.03,"unit":"ratio"}]}

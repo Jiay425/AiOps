@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","metrics":[{"name":"coupon_double_deduction_total","value":7,"unit":"count"},{"name":"coupon_redeem_error_rate","value":0.04,"unit":"ratio"}]}

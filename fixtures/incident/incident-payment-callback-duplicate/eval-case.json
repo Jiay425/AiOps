@@ -1,0 +1,18 @@
+{
+  "caseId": "incident-payment-callback-duplicate",
+  "dataClass": "TEST_SIMULATED_DATA",
+  "taskType": "INCIDENT_TO_FIX",
+  "input": "TEST_SIMULATED_DATA: payment gateway duplicate webhook delivery advanced the same order callback twice.",
+  "repository": "samples/order-service",
+  "fixtures": {
+    "prometheus": "fixtures/incident/incident-payment-callback-duplicate/prometheus.json",
+    "logs": "fixtures/incident/incident-payment-callback-duplicate/es-logs.json",
+    "trace": "fixtures/incident/incident-payment-callback-duplicate/skywalking-trace.json"
+  },
+  "expected": {
+    "strategyType": "RUNTIME_WEBHOOK_REDELIVERY",
+    "shouldEnterCodeRepair": false,
+    "rootCause": "The payment gateway webhook retry policy delivered the same callbackId repeatedly; isolate duplicate deliveries and correct gateway retry configuration before considering a source patch.",
+    "expectedNoCodePatch": true
+  }
+}

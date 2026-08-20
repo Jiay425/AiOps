@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","logs":[{"level":"ERROR","traceId":"eval-flaky-001","message":"retry assertion failed: first retry must recover transient failure","stack":["at com.example.order.FlakyRetryService.isRecoveredAfterRetry(FlakyRetryService.java:5)"]}]}

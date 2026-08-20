@@ -115,6 +115,7 @@ def test_orchestrator_helper_branch_contracts():
     assert not policy._localization_blocking({"codeLocalization": {"localizationSuccess": True}})
     assert policy._should_repair({}, {"allowPatchApply": True}, [], [])
     assert policy._should_repair({}, {}, ["bug_fix"], [])
+    assert not policy._should_repair({}, {"evaluationExpectedNoCodePatch": True}, ["bug_fix"], [])
     assert not policy._should_repair({"fixStrategy": {"shouldEnterCodeRepair": False}}, {}, [], [])
     assert not policy._should_repair({"codeLocalization": {
         "localizationConfidence": "LOW", "targetFiles": []}}, {}, [], [policy.AGENT_LOOP])

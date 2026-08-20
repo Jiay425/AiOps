@@ -9,7 +9,7 @@ from ops_autoagent.codeops import (
     PatchSandbox, PatchScopeGuard, PatchValidation, RepositoryToolkit, SecurityPolicy, ToolBudget, ToolRuntime,
 )
 from ops_autoagent.graphs import CodeOpsGraph
-from ops_autoagent.codeops.runtime import TestResult as MavenResult, TestRunner
+from ops_autoagent.codeops.runtime import FilePatch, TestResult as MavenResult, TestRunner
 
 
 def test_repository_toolkit_enforces_repository_boundary(tmp_path: Path):
@@ -92,6 +92,85 @@ def test_patch_scope_validation_and_diff_risk(tmp_path: Path):
     assert not denied["passed"]
 
 
+def test_java_scope_guard_accepts_signature_and_does_not_treat_if_as_method(tmp_path: Path):
+    source = tmp_path / "src/main/java/com/example/order/OrderQueryService.java"
+    source.parent.mkdir(parents=True)
+    source.write_text("""package com.example.order;
+import java.util.List;
+public class OrderQueryService {
+    public List<String> pageOrders(List<String> ids, int page, int size) {
+        int from = page * size;
+        return ids.subList(from, from + size);
+    }
+}
+""", encoding="utf-8")
+    proposal = PatchProposal(summary="pagination bounds", patches=[FilePatch(
+        path="src/main/java/com/example/order/OrderQueryService.java",
+        old="""    public List<String> pageOrders(List<String> ids, int page, int size) {
+        int from = page * size;
+        return ids.subList(from, from + size);
+    }""",
+        new="""    public List<String> pageOrders(List<String> ids, int page, int size) {
+        int from = page * size;
+        if (from >= ids.size()) {
+            return List.of();
+        }
+        return ids.subList(from, Math.min(from + size, ids.size()));
+    }""",
+    )])
+    guard = PatchScopeGuard().validate(tmp_path, proposal, {
+        "scopeType": "STRICT_SINGLE_METHOD",
+        "targetFiles": ["src/main/java/com/example/order/OrderQueryService.java"],
+        "targetMethods": ["OrderQueryService.pageOrders(List<String>, int, int)"],
+    })
+    assert guard["passed"]
+    assert guard["changedMethods"] == ["OrderQueryService.pageOrders"]
+
+
+def test_java_scope_guard_rejects_unrelated_method_in_complete_file_rewrite(tmp_path: Path):
+    source = tmp_path / "src/main/java/com/example/order/OrderService.java"
+    source.parent.mkdir(parents=True)
+    old = """package com.example.order;
+public class OrderService {
+    public int submit() { return 1; }
+    public int calculateTotal() { return 2; }
+}
+"""
+    new = """package com.example.order;
+public class OrderService {
+    public int submit() { return 3; }
+    public int calculateTotal() { return 4; }
+}
+"""
+    source.write_text(old, encoding="utf-8")
+    proposal = PatchProposal(summary="mixed rewrite", patches=[FilePatch(
+        path="src/main/java/com/example/order/OrderService.java", old=old, new=new,
+    )])
+    guard = PatchScopeGuard().validate(tmp_path, proposal, {
+        "scopeType": "STRICT_SINGLE_METHOD",
+        "targetFiles": ["src/main/java/com/example/order/OrderService.java"],
+        "targetMethods": ["OrderService.submit()"],
+    })
+    assert not guard["passed"]
+    assert "OrderService.calculateTotal" in guard["changedMethods"]
+    assert any("calculateTotal" in item for item in guard["violations"])
+
+
+def test_java_scope_guard_does_not_treat_record_declaration_as_constructor_method():
+    old = """public record OrderSubmitRequest(String userId) {
+    public void validate() {
+    }
+}
+"""
+    new = """public record OrderSubmitRequest(String userId) {
+    public void validate() {
+        if (userId == null) throw new IllegalArgumentException();
+    }
+}
+"""
+    assert PatchScopeGuard._changed_methods("OrderSubmitRequest.java", old, new) == ["OrderSubmitRequest.validate"]
+
+
 def test_task_dag_and_source_write_hook_contract():
     dag = CodeOpsTaskDagService()
     context = dag.mark({}, 1, "repo_understanding", "SUCCESS", "localized")
@@ -126,6 +205,48 @@ async def test_agent_loop_executes_model_selected_tools_and_stops(tmp_path: Path
     assert result["status"] == "COMPLETED" and result["turns"] == 2
     assert result["steps"][0]["toolResult"]["output"][0]["file"] == "src/app.py"
     assert len(task["context"]["agentLoopTrace"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_normalizes_absolute_read_path_inside_repository(tmp_path: Path):
+    source = tmp_path / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("def run(): return 1\n", encoding="utf-8")
+    service = AgentLoopService(EngineeringToolGateway())
+
+    async def model(request, steps):
+        if not steps:
+            return {"toolCalls": [{"toolName": "repo.read_file_snippet", "arguments": {
+                "repository": str(tmp_path), "filePath": str(source), "centerLine": 1, "radius": 5}}]}
+        return {"final": True, "finalAnswer": "read source"}
+
+    result = await service.run({"repository": str(tmp_path), "goal": "read source",
+                                "task": {"taskId": "loop-absolute-path", "context": {}}, "maxTurns": 3}, model)
+    assert result["status"] == "COMPLETED"
+    assert result["steps"][0]["toolResult"]["status"] == "SUCCESS"
+    assert result["steps"][0]["arguments"]["filePath"] == "src/app.py"
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_retries_malformed_read_only_call_in_next_turn(tmp_path: Path):
+    source = tmp_path / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("def run(): return 1\n", encoding="utf-8")
+    service = AgentLoopService(EngineeringToolGateway())
+
+    async def model(request, steps):
+        if not steps:
+            return {"toolCalls": [{"toolName": "repo.read_file_snippet", "arguments": {}}]}
+        if steps[-1]["toolResult"]["status"] == "DENIED":
+            return {"toolCalls": [{"toolName": "repo.read_file_snippet", "arguments": {
+                "filePath": "src/app.py", "centerLine": 1, "radius": 3}}]}
+        return {"final": True, "finalAnswer": '{"shouldEnterCodeRepair":true,"targetFiles":["src/app.py"]}'}
+
+    result = await service.run({"repository": str(tmp_path), "goal": "inspect run",
+                                "task": {"taskId": "loop-recover-read", "context": {}}, "maxTurns": 4}, model)
+    assert result["status"] == "COMPLETED"
+    assert result["steps"][0]["toolResult"]["status"] == "DENIED"
+    assert result["steps"][1]["toolResult"]["status"] == "SUCCESS"
 
 
 @pytest.mark.asyncio

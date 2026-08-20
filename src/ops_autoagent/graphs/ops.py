@@ -16,6 +16,8 @@ from ..ops import (EvidenceReviewer, EvidenceSignalExtractor, HistoricalMemorySe
 from ..schemas import IncidentAnalyzeRequest, now_iso
 from ..store import Store
 from ..tools import ObservabilityTools
+from .state_models import EventList, ToolTraceList, task_event
+from .subgraphs import OpsEvidenceSubgraph
 
 
 class OpsState(TypedDict, total=False):
@@ -33,13 +35,15 @@ class OpsState(TypedDict, total=False):
     runbooks: list[dict[str, Any]]
     report: str
     error: str
-    events: list[dict[str, Any]]
+    events: EventList
     plan: dict[str, Any]
     historical_memories: list[dict[str, Any]]
     matched_skills: list[dict[str, Any]]
     evidence_review: dict[str, Any]
-    tool_trace: list[dict[str, Any]]
+    tool_trace: ToolTraceList
     review_round: int
+    evidence_budget: dict[str, dict[str, Any]]
+    run_id: str
 
 
 class OpsDiagnosisGraph:
@@ -59,20 +63,34 @@ class OpsDiagnosisGraph:
         self.chat_agents = OpsMultiChatAgentService(tools.settings, store, llm)
         self.skills = OpsAgentSkillService(tools.settings)
         self.masker = SensitiveMasker()
+        self.evidence_subgraph = OpsEvidenceSubgraph(checkpointer=checkpointer)
         builder = StateGraph(OpsState)
         builder.add_node("understand_incident", self._understand)
         builder.add_node("collect_metrics", self._metrics)
         builder.add_node("collect_logs", self._logs)
         builder.add_node("collect_traces", self._traces)
+        builder.add_node("reserve_evidence_budget", self._reserve_evidence_budget)
+        builder.add_node("collect_metrics_parallel", self._metrics_parallel)
+        builder.add_node("collect_logs_parallel", self._logs_parallel)
+        builder.add_node("collect_traces_parallel", self._traces_parallel)
+        builder.add_node("evidence_barrier", self._evidence_barrier)
         builder.add_node("correlate_evidence", self._correlate)
         builder.add_node("supplement_evidence", self._supplement)
         builder.add_node("retrieve_runbooks", self._runbooks)
         builder.add_node("generate_report", self._report)
         builder.add_edge(START, "understand_incident")
-        builder.add_edge("understand_incident", "collect_metrics")
+        builder.add_conditional_edges("understand_incident", self._route_evidence_collection,
+                                      {"parallel": "reserve_evidence_budget", "serial": "collect_metrics"})
         builder.add_edge("collect_metrics", "collect_logs")
         builder.add_edge("collect_logs", "collect_traces")
         builder.add_edge("collect_traces", "retrieve_runbooks")
+        builder.add_edge("reserve_evidence_budget", "collect_metrics_parallel")
+        builder.add_edge("reserve_evidence_budget", "collect_logs_parallel")
+        builder.add_edge("reserve_evidence_budget", "collect_traces_parallel")
+        builder.add_edge("collect_metrics_parallel", "evidence_barrier")
+        builder.add_edge("collect_logs_parallel", "evidence_barrier")
+        builder.add_edge("collect_traces_parallel", "evidence_barrier")
+        builder.add_edge("evidence_barrier", "retrieve_runbooks")
         builder.add_edge("retrieve_runbooks", "correlate_evidence")
         builder.add_conditional_edges("correlate_evidence", self._route_review,
                                       {"supplement": "supplement_evidence", "continue": "generate_report"})
@@ -96,6 +114,7 @@ class OpsDiagnosisGraph:
             "state_id": f"state-{uuid.uuid4()}",
             "diagnosis_id": diagnosis_id,
             "session_id": session_id,
+            "run_id": f"run-{uuid.uuid4()}",
             "request": request.model_dump(by_alias=True),
             "status": "RUNNING",
             "review_round": 0,
@@ -103,18 +122,74 @@ class OpsDiagnosisGraph:
             "events": [],
         }
 
+    def _route_evidence_collection(self, state: OpsState) -> Literal["parallel", "serial"]:
+        return "parallel" if bool(getattr(self.tools.settings, "ops_parallel_evidence_enabled", False)) else "serial"
+
+    async def _reserve_evidence_budget(self, state: OpsState) -> dict[str, Any]:
+        requested = ("query_prometheus", "query_elasticsearch", "query_skywalking_trace")
+        remaining = max(0, self.tools.settings.ops_agent_max_tool_calls - len(state.get("tool_trace", [])))
+        reservations: dict[str, dict[str, Any]] = {}
+        for tool in requested:
+            if self.tools.settings.ops_agent_plan_driven_enabled and tool not in set(
+                    state.get("plan", {}).get("requiredTools", [])):
+                reservations[tool] = {"tool": tool, "allowed": False,
+                                      "reason": "tool is not present in investigation plan", "reserved": False,
+                                      "createTime": now_iso()}
+            elif remaining <= 0:
+                reservations[tool] = {"tool": tool, "allowed": False,
+                                      "reason": "parallel evidence budget exhausted", "reserved": False,
+                                      "createTime": now_iso()}
+            else:
+                allowed, decision = await self._authorize(state, tool)
+                reservations[tool] = {**decision, "allowed": allowed, "reserved": allowed}
+                if allowed:
+                    remaining -= 1
+        return {"evidence_budget": reservations,
+                "events": [self._event("policy", "evidence_budget_reserved", 2,
+                                         "Parallel evidence budget reserved before fan-out", state["session_id"])]}
+
+    async def _metrics_parallel(self, state: OpsState) -> dict[str, Any]:
+        result = await self._metrics(state)
+        result.pop("plan", None)
+        return result
+
+    async def _logs_parallel(self, state: OpsState) -> dict[str, Any]:
+        result = await self._logs(state)
+        result.pop("plan", None)
+        return result
+
+    async def _traces_parallel(self, state: OpsState) -> dict[str, Any]:
+        result = await self._traces(state)
+        result.pop("plan", None)
+        return result
+
+    async def _evidence_barrier(self, state: OpsState) -> dict[str, Any]:
+        return {"plan": self._plan_status(state["plan"], "traces", "COMPLETED"),
+                "events": [self._event("analysis", "evidence_barrier", 4,
+                                         "Metrics, logs and traces fan-in completed", state["session_id"])]}
+
     async def stream(self, initial: OpsState) -> AsyncIterator[tuple[dict[str, Any] | None, OpsState | None]]:
         await self._persist_incident_state(initial)
-        emitted, final = 0, initial
+        final = initial
+        seen: set[str] = set()
         try:
-            async for state in self.graph.astream(
-                initial, {"configurable": {"thread_id": initial["diagnosis_id"]}}, stream_mode="values"
+            async for update in self.graph.astream(
+                initial, {"configurable": {"thread_id": initial["diagnosis_id"]}}, stream_mode="updates"
             ):
-                final = state
-                events = state.get("events", [])
-                for event in events[emitted:]:
-                    yield event, None
-                emitted = len(events)
+                snapshot = await self.graph.aget_state(
+                    {"configurable": {"thread_id": initial["diagnosis_id"]}})
+                final = snapshot.values or final
+                for node_update in update.values() if isinstance(update, dict) else ():
+                    for event in node_update.get("events", []) if isinstance(node_update, dict) else ():
+                        event.setdefault("runId", initial.get("run_id", ""))
+                        event.setdefault("threadId", initial["diagnosis_id"])
+                        event.setdefault("subgraph", "ops_evidence")
+                        event.setdefault("node", event.get("stage", ""))
+                        event_id = str(event.get("eventId") or uuid.uuid4())
+                        if event_id in seen:
+                            continue
+                        seen.add(event_id)
+                        yield event, None
         except Exception as exc:
             final = {**final, "status": "FAILED", "error": str(exc)}
             await self._persist_incident_state(final)
@@ -157,7 +232,7 @@ class OpsDiagnosisGraph:
             await self.store.put("plans", plan["planId"], plan, plan["updateTime"])
         return {"intent": intent, "plan": self._plan_status(plan, "intent", "COMPLETED"),
                 "historical_memories": memories, "matched_skills": matched_skills,
-                "events": state["events"] + [self._event(
+                "events": [self._event(
                     "analysis", "intent", 1,
                     f"Start diagnosing service [{req['serviceName']}] in window "
                     f"[{req['startTime']} ~ {req['endTime']}]. Problem: {req['problem']}", state["session_id"])]}
@@ -165,35 +240,35 @@ class OpsDiagnosisGraph:
     async def _metrics(self, state: OpsState) -> dict[str, Any]:
         req = state["request"]
         started = time.perf_counter()
-        allowed, trace = await self._authorize(state, "query_prometheus")
+        allowed, decision = await self._authorize_for_collection(state, "query_prometheus")
         value = await self.tools.prometheus(req["serviceName"], req["startTime"], req["endTime"],
                                             req.get("fixtureCaseId", ""), req.get("endpoint", ""),
-                                            req.get("problem", "")) if allowed else {"available": False, "source": "DENIED", "error": trace[-1]["reason"]}
+                                            req.get("problem", "")) if allowed else {"available": False, "source": "DENIED", "error": decision["reason"]}
         await self._record_tool(state, "query_prometheus", {"service": req["serviceName"], "start": req["startTime"], "end": req["endTime"]}, value, started)
-        return {"metrics": value, "tool_trace": trace, "plan": self._plan_status(state["plan"], "metrics", "COMPLETED" if value.get("available") else "FAILED"),
-                "events": state["events"] + [self._event(
+        return {"metrics": value, "tool_trace": [decision], "plan": self._plan_status(state["plan"], "metrics", "COMPLETED" if value.get("available") else "FAILED"),
+                "events": [self._event(
                     "metric", "prometheus", 2, self._evidence_message("Metric", value), state["session_id"])]}
 
     async def _logs(self, state: OpsState) -> dict[str, Any]:
         req = state["request"]
         started = time.perf_counter()
-        allowed, trace = await self._authorize(state, "query_elasticsearch")
-        value = await self.tools.elk(req["serviceName"], req["startTime"], req["endTime"], req["problem"], req.get("fixtureCaseId", "")) if allowed else {"available": False, "source": "DENIED", "error": trace[-1]["reason"]}
+        allowed, decision = await self._authorize_for_collection(state, "query_elasticsearch")
+        value = await self.tools.elk(req["serviceName"], req["startTime"], req["endTime"], req["problem"], req.get("fixtureCaseId", "")) if allowed else {"available": False, "source": "DENIED", "error": decision["reason"]}
         await self._record_tool(state, "query_elasticsearch", {"service": req["serviceName"], "start": req["startTime"], "end": req["endTime"], "problem": req["problem"]}, value, started)
-        return {"logs": value, "tool_trace": trace, "plan": self._plan_status(state["plan"], "logs", "COMPLETED" if value.get("available") else "FAILED"),
-                "events": state["events"] + [self._event(
+        return {"logs": value, "tool_trace": [decision], "plan": self._plan_status(state["plan"], "logs", "COMPLETED" if value.get("available") else "FAILED"),
+                "events": [self._event(
                     "log", "elk", 3, self._evidence_message("Log", value), state["session_id"])]}
 
     async def _traces(self, state: OpsState) -> dict[str, Any]:
         req = state["request"]
         started = time.perf_counter()
-        allowed, trace = await self._authorize(state, "query_skywalking_trace")
+        allowed, decision = await self._authorize_for_collection(state, "query_skywalking_trace")
         value = await self.tools.skywalking(req["serviceName"], req.get("traceId"), req["startTime"], req["endTime"],
                                             req.get("fixtureCaseId", ""), req.get("endpoint", ""),
-                                            req.get("problem", "")) if allowed else {"available": False, "source": "DENIED", "error": trace[-1]["reason"]}
+                                            req.get("problem", "")) if allowed else {"available": False, "source": "DENIED", "error": decision["reason"]}
         await self._record_tool(state, "query_skywalking_trace", {"service": req["serviceName"], "traceId": req.get("traceId"), "start": req["startTime"], "end": req["endTime"]}, value, started)
-        return {"traces": value, "tool_trace": trace, "plan": self._plan_status(state["plan"], "traces", "COMPLETED" if value.get("available") else "FAILED"),
-                "events": state["events"] + [self._event(
+        return {"traces": value, "tool_trace": [decision], "plan": self._plan_status(state["plan"], "traces", "COMPLETED" if value.get("available") else "FAILED"),
+                "events": [self._event(
                     "trace", "skywalking", 4, self._evidence_message("Trace", value), state["session_id"])]}
 
     async def _correlate(self, state: OpsState) -> dict[str, Any]:
@@ -254,7 +329,7 @@ class OpsDiagnosisGraph:
         ]
         return {"evidence": evidence + signals, "candidates": candidates, "evidence_review": review,
                 "review_round": review_round, "plan": self._plan_status(state["plan"], "correlation", "COMPLETED"),
-                "events": state["events"] + correlation_events}
+                "events": correlation_events}
 
     def _route_review(self, state: OpsState) -> Literal["supplement", "continue"]:
         review = state.get("evidence_review", {})
@@ -267,20 +342,27 @@ class OpsDiagnosisGraph:
 
     async def _supplement(self, state: OpsState) -> dict[str, Any]:
         req, trace = state["request"], list(state.get("tool_trace", []))
+        trace_delta: list[dict[str, Any]] = []
         updates: dict[str, Any] = {}
         targets = set(state.get("evidence_review", {}).get("requiredTools", []))
         if "query_prometheus" in targets and len(trace) < self.tools.settings.ops_agent_max_tool_calls:
-            allowed, trace = await self._authorize({**state, "tool_trace": trace}, "query_prometheus")
+            allowed, decision = await self._authorize({**state, "tool_trace": trace}, "query_prometheus")
+            trace.append(decision)
+            trace_delta.append(decision)
             if allowed:
                 updates["metrics"] = await self.tools.prometheus(
                     req["serviceName"], req["startTime"], req["endTime"], req.get("fixtureCaseId", ""),
                     req.get("endpoint", ""), req.get("problem", ""))
         if "query_elasticsearch" in targets and len(trace) < self.tools.settings.ops_agent_max_tool_calls:
-            allowed, trace = await self._authorize({**state, "tool_trace": trace}, "query_elasticsearch")
+            allowed, decision = await self._authorize({**state, "tool_trace": trace}, "query_elasticsearch")
+            trace.append(decision)
+            trace_delta.append(decision)
             if allowed:
                 updates["logs"] = await self.tools.elk(req["serviceName"], req["startTime"], req["endTime"], req["problem"], req.get("fixtureCaseId", ""))
         if "query_skywalking_trace" in targets and len(trace) < self.tools.settings.ops_agent_max_tool_calls:
-            allowed, trace = await self._authorize({**state, "tool_trace": trace}, "query_skywalking_trace")
+            allowed, decision = await self._authorize({**state, "tool_trace": trace}, "query_skywalking_trace")
+            trace.append(decision)
+            trace_delta.append(decision)
             if allowed:
                 updates["traces"] = await self.tools.skywalking(
                     req["serviceName"], req.get("traceId"), req["startTime"], req["endTime"],
@@ -291,17 +373,18 @@ class OpsDiagnosisGraph:
         terms = [*state.get("intent", {}).get("keywords", []),
                  *(str(item.get("name", "")) for item in signals),
                  *(str(item.get("summary", "")) for item in signals)]
-        allowed, trace = await self._authorize({**state, "tool_trace": trace}, "query_runbook")
+        allowed, decision = await self._authorize({**state, "tool_trace": trace}, "query_runbook")
+        trace_delta.append(decision)
         runbooks = await self.runbook_rag.search(" ".join(terms), 4) if allowed else []
         skills = self.skills.to_runbook_matches(state.get("matched_skills", []))
         updates["runbooks"] = [*runbooks, *skills]
-        return {**updates, "tool_trace": trace,
-                "events": state["events"] + [self._event(
+        return {**updates, "tool_trace": trace_delta,
+                "events": [self._event(
                     "rag", "runbook_pattern", 5, json.dumps(updates["runbooks"], ensure_ascii=False),
                     state["session_id"])]}
 
     async def _runbooks(self, state: OpsState) -> dict[str, Any]:
-        allowed, trace = await self._authorize(state, "query_runbook")
+        allowed, decision = await self._authorize(state, "query_runbook")
         signals = self.signal_extractor.extract(state.get("metrics", {}), state.get("logs", {}),
                                                 state.get("traces", {}), state["request"])
         terms = [*state.get("intent", {}).get("keywords", []),
@@ -310,9 +393,9 @@ class OpsDiagnosisGraph:
         runbooks = await self.runbook_rag.search(" ".join(terms), 4) if allowed else []
         events = ([self._event("rag", "runbook_pattern", 5, json.dumps(runbooks, ensure_ascii=False),
                                state["session_id"])] if allowed else [])
-        return {"runbooks": runbooks, "tool_trace": trace,
+        return {"runbooks": runbooks, "tool_trace": [decision],
                 "plan": self._plan_status(state["plan"], "runbook", "COMPLETED"),
-                "events": state["events"] + events}
+                "events": events}
 
     async def _report(self, state: OpsState) -> dict[str, Any]:
         runbooks = list(state.get("runbooks", []))
@@ -364,7 +447,7 @@ class OpsDiagnosisGraph:
                                        top["category"], int(top["confidence"]))
         return {"report": report, "runbooks": runbooks, "status": "SUCCESS",
                 "plan": self._plan_status(state["plan"], "report", "COMPLETED"),
-                "events": state["events"] + step6_events + [
+                "events": step6_events + [
             self._event("agent", "evidence_reviewer_agent", 7,
                         "Evidence Reviewer Agent started. Auditing collected Prometheus, ELK, SkyWalking and "
                         "runbook evidence before report generation.", state["session_id"]),
@@ -448,7 +531,14 @@ class OpsDiagnosisGraph:
                 f"\nMissing evidence:\n{joined('missingEvidence')}\nRequired tools:\n{joined('requiredTools')}"
                 f"\nReport constraints:\n{joined('reportConstraints')}\nRationale: {review.get('rationale')}")
 
-    async def _authorize(self, state: OpsState, tool: str) -> tuple[bool, list[dict[str, Any]]]:
+    async def _authorize_for_collection(self, state: OpsState, tool: str) -> tuple[bool, dict[str, Any]]:
+        budget = state.get("evidence_budget", {})
+        if isinstance(budget, dict) and tool in budget:
+            decision = budget[tool]
+            return bool(decision.get("allowed")), decision
+        return await self._authorize(state, tool)
+
+    async def _authorize(self, state: OpsState, tool: str) -> tuple[bool, dict[str, Any]]:
         trace = list(state.get("tool_trace", []))
         planned = set(state.get("plan", {}).get("requiredTools", []))
         if self.tools.settings.ops_agent_plan_driven_enabled and planned and tool not in planned:
@@ -458,8 +548,7 @@ class OpsDiagnosisGraph:
             decision = await self.governance.decide(state["diagnosis_id"], tool, trace)
         else:
             decision = {"tool": tool, "allowed": True, "reason": "governance store is not configured", "createTime": now_iso()}
-        trace.append(decision)
-        return bool(decision["allowed"]), trace
+        return bool(decision["allowed"]), decision
 
     async def _record_tool(self, state: OpsState, tool: str, request: dict[str, Any], response: dict[str, Any], started: float) -> None:
         if not self.store:
@@ -475,9 +564,13 @@ class OpsDiagnosisGraph:
     @staticmethod
     def _event(event_type: str, sub_type: str, step: int | None, content: str,
                session_id: str, completed: bool = False) -> dict[str, Any]:
-        event: dict[str, Any] = {"type": event_type, "subType": sub_type, "content": content,
+        safe_content = SensitiveMasker().mask(str(content or ""))[:1200]
+        event: dict[str, Any] = {"type": event_type, "subType": sub_type, "content": safe_content,
                                  "completed": completed, "timestamp": int(time.time() * 1000),
-                                 "sessionId": session_id}
+                                 "sessionId": session_id, "eventId": f"event-{uuid.uuid4()}",
+                                 "taskId": session_id, "stage": sub_type, "kind": event_type,
+                                 "attempt": step or 1, "status": "COMPLETED" if completed else "EMITTED",
+                                 "summary": safe_content, "artifactRefs": []}
         if step is not None:
             event["step"] = step
         return event
@@ -531,6 +624,8 @@ class OpsDiagnosisGraph:
         record = {
             "stateId": state["state_id"], "diagnosisId": state["diagnosis_id"],
             "sessionId": state["session_id"], "eventId": request.get("eventId"),
+            "threadId": state["diagnosis_id"], "runId": state.get("run_id", ""),
+            "subgraph": "ops_evidence",
             "serviceName": request.get("serviceName", "unknown-service"),
             "severity": request.get("severity", ""), "alertRule": request.get("alertRule", ""),
             "timeWindow": {"startTime": request.get("startTime"), "endTime": request.get("endTime")},

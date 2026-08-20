@@ -12,7 +12,8 @@ class Store:
     TABLES = {
         "diagnoses", "tasks", "alerts", "dispatches", "memories", "tool_logs", "notifications",
         "eval_cases", "eval_runs", "eval_metrics", "incident_states", "plans", "reviews", "audit_logs",
-        "service_owners", "tool_policies",
+        "service_owners", "tool_policies", "approvals", "task_events",
+        "artifacts", "runtime_metrics",
     }
     def __init__(self, path: Path, mysql_url: str = "", mysql_username: str = "root", mysql_password: str = "",
                  mysql_pool_min_size: int = 1, mysql_pool_max_size: int = 10,

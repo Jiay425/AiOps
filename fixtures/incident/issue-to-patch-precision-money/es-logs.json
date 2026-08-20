@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","logs":[{"level":"ERROR","traceId":"eval-money-001","message":"amount mismatch expected=0.30 actual=0.30000000000000004 unitPrice=0.10 quantity=3","stack":["at com.example.order.OrderSubmitService.calculateTotal(OrderSubmitService.java:22)"]}]}

@@ -1,0 +1,9 @@
+{
+  "dataClass": "TEST_SIMULATED_DATA",
+  "service": "order-service",
+  "metrics": [
+    {"name": "payment_callback_signature_invalid_total", "query": "increase(payment_callback_signature_invalid_total[5m])", "value": 143, "unit": "count"},
+    {"name": "payment_callback_key_version_mismatch_total", "query": "increase(payment_callback_key_version_mismatch_total[5m])", "value": 141, "unit": "count"},
+    {"name": "payment_callback_accepted_percent", "query": "sum(rate(payment_callback_accepted_total[5m]))", "value": 61, "unit": "percent"}
+  ]
+}

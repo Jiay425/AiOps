@@ -3,8 +3,16 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from ops_autoagent.api import api_guard_counters, app, settings, store
-from ops_autoagent.codeops.eval_cases import builtin_codeops_eval_cases
+from ops_autoagent.api import (_bounded_evaluation_text, _evaluation_terminal_success, _fixture_payloads, _previous_successful_eval_run,
+                               api_guard_counters, app, settings, store)
+from ops_autoagent.config import get_settings
+from ops_autoagent.graphs.codeops import CodeOpsGraph
+from ops_autoagent.codeops.eval_cases import (BUSINESS_EVAL_LEVEL, BASELINE_CASE_SOURCE,
+                                              EXPANDED_BUSINESS_CASE_IDS, EXPANSION_CASE_SOURCE,
+                                              LEGACY_BASELINE_CASE_IDS, builtin_codeops_eval_cases,
+                                              runtime_reliability_cases)
+from ops_autoagent.codeops.evaluation import _evaluation_outcome, _fix_strategy, _normalized_missing, collect_raw_outputs
+from ops_autoagent.codeops.evaluation import build_report
 
 
 @pytest.fixture(autouse=True)
@@ -27,14 +35,102 @@ async def test_health_and_skills():
 
 
 def test_all_legacy_codeops_builtin_cases_are_present():
-    assert [case["caseId"] for case in builtin_codeops_eval_cases()] == [
-        "code-review-basic", "issue-to-patch-basic", "release-risk-basic", "incident-to-fix-basic",
-        "incident-inventory-oversell-concurrency", "incident-db-pool-runtime-pressure",
-        "incident-order-create-npe", "incident-gc-latency-spike", "incident-rpc-timeout-dependency",
-        "incident-redis-timeout-cache", "incident-slow-sql-db-span", "incident-thread-pool-saturation",
-        "incident-gateway-5xx-upstream", "scope-violation-reflection", "test-assertion-reflection",
-        "scope-expansion-cross-file-idempotency",
-    ]
+    cases = builtin_codeops_eval_cases()
+    assert [case["caseId"] for case in cases[:16]] == list(LEGACY_BASELINE_CASE_IDS)
+    assert len(cases) == 52
+    assert [case["caseId"] for case in cases[16:]] == list(EXPANDED_BUSINESS_CASE_IDS)
+    assert len({case["caseId"] for case in cases}) == 52
+    assert all(case["caseLifecycle"] == "COMPLETED" for case in cases)
+    assert all(case["caseSource"] == BASELINE_CASE_SOURCE for case in cases[:16])
+    assert all(case["evaluationLevel"] == BUSINESS_EVAL_LEVEL for case in cases)
+
+
+def test_expanded_cases_have_traceable_fixture_and_repository_references():
+    cases = builtin_codeops_eval_cases()
+    expanded = cases[16:]
+    assert all(case["caseSource"] == EXPANSION_CASE_SOURCE for case in expanded)
+    assert all(case["fixtureReference"] and Path(case["fixtureReference"]).exists() for case in expanded)
+    assert all(case["repositoryFixtureReference"] and Path(case["repositoryFixtureReference"]).exists()
+               for case in expanded)
+    assert all(case["context"].get("fixtureDataClass") == "TEST_SIMULATED_DATA" for case in expanded)
+    assert all(len(_fixture_payloads(case)) >= 2 for case in expanded)
+
+
+def test_shared_scenario_fixture_is_selected_by_case_id_not_by_a_reused_incident():
+    cases = {case["caseId"]: case for case in builtin_codeops_eval_cases()}
+    payload = _fixture_payloads(cases["incident-db-deadlock"])
+    text = str(payload).lower()
+    assert {"prometheus", "logs", "trace"} == set(payload)
+    assert "deadlock" in text and "rate-limit" not in text
+    assert cases["incident-db-deadlock"]["evaluationCaseRevision"] == "8"
+    assert cases["incident-db-deadlock"]["expectedEvidenceKeywords"] == ["database", "deadlock", "lock", "transaction"]
+
+
+def test_corrected_code_fix_cases_use_dedicated_evidence_and_vulnerable_snapshot():
+    ids = {
+        "incident-order-idempotency-race", "incident-coupon-double-deduction", "incident-order-state-transition-race",
+        "issue-to-patch-pagination-boundary", "issue-to-patch-precision-money", "issue-to-patch-timezone-date",
+        "issue-to-patch-input-validation", "issue-to-patch-retry-idempotency", "scope-cross-module-patch-blocked",
+        "test-flaky-reflection-repair",
+    }
+    cases = {case["caseId"]: case for case in builtin_codeops_eval_cases() if case["caseId"] in ids}
+    assert len(cases) == 10
+    for case in cases.values():
+        fixture = Path(case["fixtureReference"])
+        assert case["evaluationCaseRevision"] == "2"
+        assert case["repository"] == "samples/codeops-eval"
+        assert case["context"]["fixtureCaseId"] == case["caseId"]
+        assert all((fixture.parent / name).is_file() for name in ("eval-case.json", "prometheus.json", "es-logs.json", "skywalking-trace.json"))
+        for relative in case["expectedTargetFiles"]:
+            assert (Path(case["repository"]) / relative).is_file()
+
+
+def test_fixture_path_resolves_to_its_case_id():
+    assert CodeOpsGraph._fixture_case_id({"fixtureCase": "fixtures/incident/issue-to-patch-pagination-boundary/eval-case.json"}) == \
+        "issue-to-patch-pagination-boundary"
+
+
+def test_runtime_cases_are_not_business_eval_cases():
+    business_ids = {case["caseId"] for case in builtin_codeops_eval_cases()}
+    runtime_ids = {case["caseId"] for case in runtime_reliability_cases()}
+    assert len(runtime_ids) == 10 and business_ids.isdisjoint(runtime_ids)
+
+
+def test_expected_no_code_fix_is_a_valid_evaluation_terminal_state():
+    assert _evaluation_terminal_success({"expectedFixStrategy": "NO_CODE_FIX"}, "NO_CODE_FIX")
+    assert not _evaluation_terminal_success({"expectedFixStrategy": "CODE_FIX"}, "NO_CODE_FIX")
+    assert _evaluation_terminal_success({"expectedOutcome": {"requiredStoppingState": "SCOPE_GUARD_REJECTED_OR_HUMAN_TAKEOVER"}}, "REVIEW_REJECTED")
+
+
+def test_explicit_optional_env_file_loads_without_hardcoding_a_secret_path(tmp_path: Path, monkeypatch):
+    env_file = tmp_path / "local.env"
+    env_file.write_text("OPENAI_BASE_URL=https://example.invalid\nOPENAI_API_KEY=test-only-key\n", encoding="utf-8")
+    monkeypatch.setenv("OPS_AUTOAGENT_ENV_FILE", str(env_file))
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    get_settings.cache_clear()
+    loaded = get_settings()
+    try:
+        assert loaded.openai_base_url == "https://example.invalid"
+        assert loaded.openai_api_key == "test-only-key"
+    finally:
+        import os
+        os.environ.pop("OPENAI_BASE_URL", None)
+        os.environ.pop("OPENAI_API_KEY", None)
+        get_settings.cache_clear()
+
+
+def test_evaluation_metric_projection_is_bounded_and_omits_repository_snapshot():
+    text = _bounded_evaluation_text(
+        {"taskType": "ISSUE_TO_PATCH", "goal": "fix", "status": "COMPLETED",
+         "steps": [{"selectedSkill": "bug_fix", "status": "SUCCESS",
+                     "resultSummary": "ok", "rawEvidenceJson": "x" * 100000}]},
+        {"fixtureEvidence": {"logs": "fixture"}},
+        {"repoBaselineSnapshot": {"secret.java": "secret" * 100000},
+         "patchGeneration": {"summary": "patch", "patchDraft": "large" * 100000}},
+    )
+    assert len(text) <= 60000
+    assert "secret.java" not in text
 
 
 @pytest.mark.asyncio
@@ -120,6 +216,162 @@ async def test_real_evaluation_endpoints_execute_graphs():
         "averageToolCallCount", "averageLatencyMs", "runs",
     }
     assert len(await store.find("eval_metrics", lambda row: row["runId"] == ops["data"]["runs"][0]["runId"])) == 12
+
+
+@pytest.mark.asyncio
+async def test_successful_same_revision_case_is_not_rerun():
+    case = next(item for item in builtin_codeops_eval_cases() if item["caseId"] == "incident-db-deadlock")
+    await store.put("eval_runs", "existing-success", {"runId": "existing-success", "caseId": case["caseId"],
+                    "taskId": "prior-task", "status": "SUCCESS", "detail": {"expected": case}}, "2026-08-15T00:00:00")
+    prior = await _previous_successful_eval_run(case)
+    assert prior and prior["taskId"] == "prior-task"
+
+
+@pytest.mark.asyncio
+async def test_report_rebuild_uses_current_scoring_without_invoking_a_graph():
+    case = next(item for item in builtin_codeops_eval_cases() if item["caseId"] == "incident-db-deadlock")
+    task = {"taskId": "rebuild-task", "taskType": case["taskType"], "status": "NO_CODE_FIX",
+            "context": {}, "steps": [{"stepNo": 1, "selectedSkill": "ops_diagnosis", "status": "SUCCESS",
+                                          "resultSummary": "deadlock evidence", "rawEvidenceJson": "{}"}],
+            "usedToolCalls": 3, "finalSummary": "deadlock isolated", "repository": case["repository"]}
+    run = {"runId": "rebuild-run", "caseId": case["caseId"], "taskId": task["taskId"],
+           "taskType": case["taskType"], "status": "SUCCESS", "evidenceKeywordCoverage": 1.0,
+           "artifactCoverage": 1.0, "stepCount": 1, "usedToolCalls": 3, "latencyMs": 10,
+           "detail": {"expected": case, "codeLocalizationCoverage": 1.0,
+                      "localizationDecisionCoverage": 1.0, "patchCoverage": 1.0, "testCoverage": 1.0}}
+    await store.put("tasks", task["taskId"], task, "2026-08-15T00:00:00")
+    await store.put("eval_runs", run["runId"], run, "2026-08-15T00:00:00")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/v1/codeops/evaluation/report/rebuild")
+    data = response.json()["data"]
+    assert response.json()["code"] == "0000"
+    assert data["evaluationScoringSchemaVersion"] == "2"
+    assert data["catalogBusinessE2ETotal"] == 52
+    assert data["evaluatedBusinessE2ETotal"] == 1
+    assert data["cases"][0]["rootCauseHit"] is True
+
+
+def test_expanded_code_fix_cases_preserve_fixture_test_oracles():
+    cases = [case for case in builtin_codeops_eval_cases()
+             if case.get("caseSource") == "EVAL_EXPANSION" and case.get("expectedOutcome", {}).get("requiresPatchSandbox")]
+    assert cases
+    assert all(case["context"].get("allowPatchApply") is True for case in cases)
+    assert all("allowTestPatchApply" not in case["context"] for case in cases)
+
+
+def test_evaluation_metrics_keep_requested_fixture_and_structured_fix_strategy():
+    text = _bounded_evaluation_text(
+        {"taskType": "ISSUE_TO_PATCH", "goal": "money precision", "steps": []}, {}, {},
+        {"logs": {"observations": ["amount mismatch 0.30000000000000004"]}},
+    )
+    assert "amount mismatch" in text
+    assert _fix_strategy({"fixStrategy": {"strategyType": "CODE_FIX"}}) == "CODE_FIX"
+
+
+def test_case_report_uses_runtime_evidence_keyword_coverage():
+    outcome = _evaluation_outcome(
+        {"expectedFixStrategy": "CODE_FIX"}, {"status": "SUCCESS", "evidenceKeywordCoverage": 1.0},
+        {"status": "COMPLETED", "context": {}}, {"testExecutionResults": ["success=true"], "reviewVerdict": "ACCEPT"},
+        {"score": 1.0}, {}, {}, {"success": True},
+    )
+    assert outcome["rootCauseHit"] is True
+    assert outcome["evidenceCoverage"]["keywordCoverage"] == 1.0
+
+
+def test_case_report_normalizes_method_signatures_for_localization():
+    assert not _normalized_missing(["submitHttp", "validate"], [
+        "OrderController.submitHttp(OrderSubmitRequest)", "OrderSubmitRequest.validate()",
+    ])
+
+
+def test_case_report_uses_structured_localization_when_later_steps_overwrite_fields():
+    task = {"steps": [
+        {"rawEvidenceJson": '{"targetMethods":["wrongMethod"]}'},
+        {"rawEvidenceJson": '{"targetMethods":["reviewerSummary"]}'},
+    ], "context": {"incidentFixWorkingMemory": {"codeLocalization": {
+        "targetFiles": ["src/main/java/OrderService.java"], "targetMethods": ["OrderService.submit(Request)"],
+        "strategyType": "CODE_FIX", "scopeDecisionType": "STRICT_SINGLE_METHOD", "shouldEnterCodeRepair": True,
+    }}}}
+    raw = collect_raw_outputs(task)
+    assert raw["targetMethods"] == ["OrderService.submit(Request)"]
+    assert raw["targetFiles"] == ["src/main/java/OrderService.java"]
+
+
+def test_delivery_only_report_separates_sandbox_verification_from_production_apply():
+    report = build_report("batch", [{
+        "status": "SUCCESS", "localizationEval": {"expectedTargetFiles": [], "expectedTargetMethods": [], "expectedFixStrategy": "", "expectedScopeDecision": "", "targetFileMatched": None, "targetMethodMatched": None, "fixStrategyMatched": None, "scopeDecisionMatched": None, "score": 1.0},
+        "scopeType": "STRICT_SINGLE_METHOD", "patchApplied": False, "compilePassed": True, "testsPassed": True,
+            "patchGenerated": True, "verificationStatus": "PASSED", "rootCauseHit": True,
+            "evidenceCoverage": {"keywordCoverage": 1.0}, "repairAttempts": 0, "reflectionRounds": 0, "latencyMs": 10,
+            "expectedOutcome": {"classification": "CODE_FIX"}, "targetMethods": ["submit"], "reflectionRecovered": False,
+            "realEvidenceCoverage": 1.0, "patchQuality": {}, "patchSandbox": {}, "steps": [],
+    }, {
+        "status": "SUCCESS", "localizationEval": {"expectedTargetFiles": [], "expectedTargetMethods": [], "expectedFixStrategy": "", "expectedScopeDecision": "", "targetFileMatched": None, "targetMethodMatched": None, "fixStrategyMatched": None, "scopeDecisionMatched": None, "score": 1.0},
+        "scopeType": "STRICT_SINGLE_METHOD", "patchApplied": False, "compilePassed": True, "testsPassed": False,
+            "patchGenerated": True, "verificationStatus": "FAILED_OR_NOT_EXECUTED", "rootCauseHit": True,
+            "evidenceCoverage": {"keywordCoverage": 1.0}, "repairAttempts": 0, "reflectionRounds": 0, "latencyMs": 10,
+            "expectedOutcome": {"classification": "CODE_FIX", "requiredStoppingState": "SCOPE_GUARD_REJECTED_OR_HUMAN_TAKEOVER"},
+            "targetMethods": ["submit"], "reflectionRecovered": False, "realEvidenceCoverage": 1.0,
+            "patchQuality": {}, "patchSandbox": {}, "steps": [],
+    }])
+    assert report["summaryMetrics"]["patchGeneratedRate"] == 1.0
+    assert report["summaryMetrics"]["verificationPassRate"] == 1.0
+    assert report["summaryMetrics"]["patchApplyRate"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_expanded_business_catalog_and_representative_cases_use_real_graph_path():
+    representative = [
+        "incident-order-idempotency-race",  # incident / distributed consistency
+        "incident-db-deadlock",  # database / infrastructure
+        "issue-to-patch-precision-money",  # issue to patch
+        "release-risk-canary-rollback",  # release risk
+    ]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        catalog = (await client.get("/api/v1/codeops/evaluation/cases", params={"caseSource": "EVAL_EXPANSION"})).json()
+        summary = (await client.get("/api/v1/codeops/evaluation/summary")).json()
+        runs = [(case_id, (await client.post(f"/api/v1/codeops/evaluation/run/{case_id}")).json())
+                for case_id in representative]
+    assert catalog["code"] == "0000" and len(catalog["data"]) == 36
+    assert summary["data"]["businessE2ETotal"] == 52
+    assert summary["data"]["baselineCompleted"] == 16
+    assert summary["data"]["newlyAddedCompleted"] == 36
+    assert summary["data"]["runtimeSafetyReliabilityCases"] == 10
+    for case_id, response in runs:
+        assert response["code"] == "0000"
+        run = response["data"]["runs"][0]
+        assert run["caseId"] == case_id and run["taskId"]
+        assert run["detail"]["expected"]["evaluationLevel"] == BUSINESS_EVAL_LEVEL
+
+
+@pytest.mark.asyncio
+async def test_full_business_evaluation_report_keeps_runtime_cases_separate():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/v1/codeops/evaluation/run")
+        report_response = await client.get("/api/v1/codeops/evaluation/report")
+    assert response.json()["code"] == "0000"
+    result = response.json()["data"]
+    report = report_response.json()["data"]
+    assert (result["totalCases"], result["businessE2ETotal"], result["baselineCompleted"],
+            result["newlyAddedCompleted"], result["runtimeSafetyReliabilityCases"]) == (52, 52, 16, 36, 10)
+    assert (report["businessE2ETotal"], report["baselineCompleted"], report["newlyAddedCompleted"],
+            report["runtimeSafetyReliabilityCases"]) == (52, 16, 36, 10)
+    required = {"caseId", "caseLifecycle", "caseSource", "evaluationLevel", "fixtureReference",
+                "expectedOutcome", "actualOutcome", "rootCauseHit", "evidenceCoverage", "localizationCoverage",
+                "patchGenerated", "verificationStatus", "reviewDecision", "scopeGuardStatus", "toolCallCount",
+                "repairAttempts", "latencyMs", "failureReason"}
+    assert len(report["cases"]) == 52 and all(required <= set(case) for case in report["cases"])
+
+
+@pytest.mark.asyncio
+async def test_scope_expansion_eval_case_keeps_effect_boundary_zero():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/v1/codeops/evaluation/run/scope-cross-module-patch-blocked")
+    assert response.json()["code"] == "0000"
+    run = response.json()["data"]["runs"][0]
+    metrics = await store.find("runtime_metrics", lambda item: item.get("taskId") == run["taskId"])
+    writes = [item for item in metrics if item.get("metricName") == "unauthorized_target_repository_writes"]
+    assert writes and all(item.get("value") == 0 for item in writes)
 
 
 @pytest.mark.asyncio

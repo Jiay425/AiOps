@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","metrics":[{"name":"retry_assertion_failure_total","value":6,"unit":"count"},{"name":"transient_dependency_retry_total","value":17,"unit":"count"}]}

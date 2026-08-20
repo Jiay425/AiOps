@@ -119,6 +119,8 @@ class IncidentFixOrchestratorPolicy:
             return self._call(self.REVIEW, "已有代码上下文和知识上下文，下一步由代码审查 Agent 分析风险。")
         if not m.get("testVerification") and self.TEST not in done:
             return self._call(self.TEST, "代码审查后需要补充验证计划。")
+        if not m.get("releaseRisk") and self.RELEASE not in done:
+            return self._call(self.RELEASE, "只读审查与基线验证已完成，交由独立 Reviewer 输出风险结论和人工复核点。")
         return self._stop("Code-Review 的代码理解、知识补充、审查和测试验证阶段均已完成或已尝试。")
 
     def _needs_agent_loop(self, memory, done, context, incident=False):
@@ -139,21 +141,37 @@ class IncidentFixOrchestratorPolicy:
 
     @staticmethod
     def _should_repair(memory, context, focus, executed):
+        if context.get("evaluationExpectedNoCodePatch") is True:
+            return False
         strategy = memory.get("fixStrategy", {})
         strategy_type = strategy.get("strategyType", strategy.get("fixStrategy"))
         if IncidentFixOrchestratorPolicy._localization_blocking(memory):
             return False
-        if str(strategy_type or "").upper() == "NEED_MORE_EVIDENCE" or strategy.get("shouldEnterCodeRepair") is False:
+        if str(strategy_type or "").upper() == "NEED_MORE_EVIDENCE":
             return False
-        if (context.get("allowPatchApply") is True or context.get("allowTestPatchApply") is True or
-                {str(item).lower() for item in focus} & {"bug_fix", "test_verification"}):
+        explicitly_authorized = (context.get("allowPatchApply") is True or
+                                 context.get("allowTestPatchApply") is True or
+                                 {str(item).lower() for item in focus} & {"bug_fix", "test_verification"})
+        localization = memory.get("codeLocalization") or {}
+        if explicitly_authorized:
+            # The agent loop may conservatively return false while it still asks for
+            # source confirmation.  That is not a NO_CODE_FIX decision for an
+            # explicitly code-fix case.  The repository investigation must have
+            # run and must have produced concrete candidates before this override.
+            if not localization:
+                return True
+            if IncidentFixOrchestratorPolicy.REPO not in executed:
+                return False
+            if not localization.get("targetFiles") or localization.get("localizationBlocking") is True:
+                return False
             return True
+        if strategy.get("shouldEnterCodeRepair") is False:
+            return False
         text = (str(memory.get("opsEvidence", {})) + "\n" + str(memory.get("codeHints", {})) + "\n"
                 + str(memory.get("codeLocalization", {}))).lower()
         if ((".java" in text or "controller." in text)
                 and any(term in text for term in ("exception", "stack", "at com.", "negative", "duplicate"))):
             return True
-        localization = memory.get("codeLocalization", {})
         if (IncidentFixOrchestratorPolicy.AGENT_LOOP in executed
                 and str(localization.get("localizationConfidence", "")).upper() == "LOW"
                 and not localization.get("targetFiles")):
@@ -176,8 +194,11 @@ class IncidentFixOrchestratorPolicy:
                 or IncidentFixOrchestratorPolicy.REPO in done):
             return False
         localization = memory.get("codeLocalization") or {}
+        missing = localization.get("missingEvidence") or []
+        strategy = memory.get("fixStrategy") or {}
+        missing = [*missing, *(strategy.get("missingEvidence") or [])]
         return bool(localization) and (str(localization.get("localizationConfidence", "")).upper() == "LOW"
-                                       or not localization.get("targetFiles"))
+                                       or not localization.get("targetFiles") or bool(missing))
 
     @staticmethod
     def _call(skill, reason):

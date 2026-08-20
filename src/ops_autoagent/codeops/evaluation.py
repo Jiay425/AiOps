@@ -8,6 +8,8 @@ from typing import Any
 
 from ..schemas import now_iso
 
+EVALUATION_SCORING_SCHEMA_VERSION = "2"
+
 
 def collect_raw_outputs(task: dict[str, Any]) -> dict[str, Any]:
     merged: dict[str, Any] = {}
@@ -21,6 +23,20 @@ def collect_raw_outputs(task: dict[str, Any]) -> dict[str, Any]:
             continue
         if isinstance(parsed, dict):
             merged.update(parsed)
+    # Downstream Reviewer/Test steps may carry convenience fields with the same
+    # names as localization.  The graph's structured investigation result is
+    # the authoritative source for those facts, so recover it from compacted
+    # working memory before scoring rather than letting later prose overwrite
+    # a real repository-investigation decision.
+    context = task.get("context") if isinstance(task.get("context"), dict) else {}
+    memory = context.get("incidentFixWorkingMemory") if isinstance(context.get("incidentFixWorkingMemory"), dict) else {}
+    localization = memory.get("codeLocalization") if isinstance(memory.get("codeLocalization"), dict) else {}
+    if localization:
+        for key in ("targetFiles", "targetMethods", "strategyType", "fixStrategy", "scopeDecision",
+                    "scopeDecisionType", "shouldEnterCodeRepair", "rootCauseLocationType"):
+            if localization.get(key) not in (None, "", [], {}):
+                merged[key] = localization[key]
+        merged["localizationDecision"] = localization
     return merged
 
 
@@ -51,8 +67,11 @@ def _scope_type(raw: dict[str, Any]) -> str:
 
 def _fix_strategy(raw: dict[str, Any]) -> str:
     decision = _decision(raw)
-    return str(_first(decision.get("fixStrategy"), decision.get("strategyType"),
-                      raw.get("fixStrategy"), raw.get("strategyType")) or "")
+    raw_strategy = raw.get("fixStrategy")
+    if isinstance(raw_strategy, dict):
+        raw_strategy = _first(raw_strategy.get("fixStrategy"), raw_strategy.get("strategyType"))
+    return str(_first(decision.get("fixStrategy"), decision.get("strategyType"), raw_strategy,
+                      raw.get("strategyType")) or "")
 
 
 def _scope_decision(raw: dict[str, Any]) -> str:
@@ -80,10 +99,13 @@ def _target_methods(raw: dict[str, Any]) -> list[str]:
 
 
 def _normalized_missing(expected: list[str], actual: list[str]) -> list[str]:
-    normalized = [item.strip().replace("\\", "/").replace("$", ".").lower() for item in actual]
+    def identity(value: str) -> str:
+        return value.strip().replace("\\", "/").replace("$", ".").split("(", 1)[0].lower()
+
+    normalized = [identity(item) for item in actual]
     missing = []
     for item in expected:
-        value = item.strip().replace("\\", "/").replace("$", ".").lower()
+        value = identity(item)
         if not any(candidate == value or candidate.endswith("/" + value) or candidate.endswith("." + value)
                    or value.endswith("/" + candidate) or value.endswith("." + candidate) for candidate in normalized):
             missing.append(item)
@@ -148,8 +170,56 @@ def _step_reports(task: dict[str, Any]) -> list[dict[str, Any]]:
             for step in task.get("steps") or []]
 
 
+def _evaluation_outcome(case: dict[str, Any], run: dict[str, Any], task: dict[str, Any], raw: dict[str, Any],
+                        localization: dict[str, Any], coverage: dict[str, Any], guard: dict[str, Any],
+                        compile_gate: dict[str, Any]) -> dict[str, Any]:
+    detail = run.get("detail") if isinstance(run.get("detail"), dict) else {}
+    keyword_coverage = float(detail.get("evidenceCoverage") or detail.get("evidenceKeywordCoverage")
+                             or run.get("evidenceKeywordCoverage") or 0)
+    real_coverage = float(coverage.get("realEvidenceCoverage") or 0)
+    localization_coverage = float(localization.get("score") or 0)
+    strategy = str(case.get("expectedFixStrategy") or "").upper()
+    no_code = strategy == "NO_CODE_FIX" or str(case.get("expectedScopeDecision") or "").upper() == "NO_CODE_FIX"
+    root_cause_hit = keyword_coverage >= 0.5 and (no_code or localization_coverage >= 0.5)
+    if no_code:
+        verification_status = "SKIPPED_NO_CODE_FIX"
+    elif compile_gate.get("success") is True and _tests_passed(raw):
+        verification_status = "PASSED"
+    elif compile_gate.get("success") is False:
+        verification_status = "COMPILE_FAILED"
+    else:
+        verification_status = "FAILED_OR_NOT_EXECUTED"
+    review_decision = str(raw.get("reviewVerdict") or raw.get("patchDecision") or "NOT_AVAILABLE")
+    if guard.get("passed") is True:
+        scope_guard_status = "PASSED"
+    elif guard.get("passed") is False:
+        scope_guard_status = "REJECTED"
+    else:
+        scope_guard_status = "NOT_APPLICABLE" if no_code else "NOT_RUN"
+    context = task.get("context") if isinstance(task.get("context"), dict) else {}
+    attempts = max(int(task.get("repairAttempt") or 0), int(context.get("incidentFixReflectionRound") or 0))
+    failure_reason = str(run.get("errorMessage") or raw.get("blockedReason") or raw.get("failureType") or "")
+    if not failure_reason and run.get("status") != "SUCCESS":
+        failure_reason = str(task.get("stopReason") or task.get("status") or "EVAL_FAILED")
+    return {
+        "actualOutcome": {"taskStatus": task.get("status", ""), "evalStatus": run.get("status", ""),
+                          "fixStrategy": _fix_strategy(raw), "reviewDecision": review_decision},
+        "rootCauseHit": root_cause_hit,
+        "evidenceCoverage": {"keywordCoverage": keyword_coverage, "realEvidenceCoverage": real_coverage,
+                              "fixtureFallbackUsed": coverage.get("fixtureFallbackUsed") is True},
+        "localizationCoverage": localization_coverage,
+        "verificationStatus": verification_status,
+        "reviewDecision": review_decision,
+        "scopeGuardStatus": scope_guard_status,
+        "toolCallCount": int(task.get("usedToolCalls") or run.get("usedToolCalls") or 0),
+        "repairAttempts": attempts,
+        "failureReason": failure_reason,
+    }
+
+
 def build_case_report(batch_id: str, case: dict[str, Any], run: dict[str, Any],
                       task: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], str]:
+    detail = run.get("detail") if isinstance(run.get("detail"), dict) else {}
     raw = collect_raw_outputs(task)
     localization = _localization_eval(case, raw)
     failures = task.get("context", {}).get("incidentFixReflectionFailures", [])
@@ -165,12 +235,19 @@ def build_case_report(batch_id: str, case: dict[str, Any], run: dict[str, Any],
     guard, compile_gate = _mapping(raw.get("patchScopeGuard")), _mapping(raw.get("compileGate"))
     coverage, quality, sandbox = (_mapping(raw.get("evidenceCoverage")), _mapping(raw.get("patchQuality")),
                                   _mapping(raw.get("patchSandbox")))
+    eval_outcome = _evaluation_outcome(case, run, task, raw, localization, coverage, guard, compile_gate)
     failure_type = (str(guard.get("failureType") or "SCOPE_GUARD_FAILED") if guard.get("passed") is False
                     else "COMPILE_FAILED" if compile_gate.get("success") is False else "")
     failed_step = next((step for step in task.get("steps") or [] if step.get("status") == "FAILED"), None)
     base = f"data/codeops-eval/{batch_id}/cases/{case['caseId']}"
     report = {"caseId": run["caseId"], "caseName": case.get("caseName") or run["caseId"],
               "status": run["status"], "taskId": run.get("taskId"), "taskType": case.get("taskType") or "",
+              "caseLifecycle": case.get("caseLifecycle", ""), "caseSource": case.get("caseSource", ""),
+              "evaluationScoringSchemaVersion": str(detail.get("evaluationScoringSchemaVersion")
+                                                     or EVALUATION_SCORING_SCHEMA_VERSION),
+              "evaluationLevel": case.get("evaluationLevel", ""), "caseCategory": case.get("caseCategory", ""),
+              "fixtureReference": case.get("fixtureReference", ""), "fixtureReuseFrom": case.get("fixtureReuseFrom", ""),
+              "expectedOutcome": case.get("expectedOutcome", {}), **eval_outcome,
               "scopeType": _scope_type(raw), "fixStrategy": _fix_strategy(raw),
               "scopeDecision": _scope_decision(raw),
               "rootCauseLocationType": str(_first(_decision(raw).get("rootCauseLocationType"),
@@ -246,7 +323,9 @@ def build_report(batch_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(cases)
     if not cases:
         return {"batchId": batch_id, "runTime": now_iso(), "totalCases": 0, "successCases": 0,
-                "failedCases": 0, "summaryMetrics": _empty_metrics(), "cases": [], "pipelineTrace": []}
+                "failedCases": 0, "skippedCases": 0, "businessE2ETotal": 0, "baselineCompleted": 0,
+                "newlyAddedCompleted": 0, "runtimeSafetyReliabilityCases": 10,
+                "summaryMetrics": _empty_metrics(), "cases": [], "pipelineTrace": []}
     expected_files = [case for case in cases if case["localizationEval"]["expectedTargetFiles"]]
     expected_methods = [case for case in cases if case["localizationEval"]["expectedTargetMethods"]]
     expected_fix = [case for case in cases if case["localizationEval"]["expectedFixStrategy"]]
@@ -256,6 +335,9 @@ def build_report(batch_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
     no_code = [case for case in cases if case["scopeType"] == "NO_CODE_FIX"]
     quality = [case for case in cases if case["patchQuality"]]
     sandbox = [case for case in cases if case["patchSandbox"]]
+    expected_code_fix = [case for case in cases if case.get("expectedOutcome", {}).get("classification") == "CODE_FIX"]
+    verification_eligible = [case for case in expected_code_fix
+                             if not case.get("expectedOutcome", {}).get("requiredStoppingState")]
     metrics = {
         "scopeAccuracy": _rate(sum(not case["patchGenerated"] if case["scopeType"] == "NO_CODE_FIX"
                                     else bool(case["scopeType"] and case["targetMethods"]) for case in cases), total),
@@ -279,10 +361,28 @@ def build_report(batch_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
             sum(case["patchQuality"].get("staticSafetyPassed") is True for case in quality), len(quality)),
         "patchSandboxIsolationRate": _rate(
             sum(case["patchSandbox"].get("isolated") is True for case in sandbox), len(sandbox)),
+        # These are the primary business-effect metrics for a delivery_only
+        # deployment.  They deliberately distinguish a verified sandbox patch
+        # from production apply, which remains approval-gated.
+        "rootCauseHitRate": _rate(sum(case["rootCauseHit"] is True for case in cases), total),
+        "evidenceKeywordCoverageRate": _average([
+            float(_mapping(case.get("evidenceCoverage")).get("keywordCoverage") or 0) for case in cases]),
+        "patchGeneratedRate": _rate(sum(case["patchGenerated"] is True for case in expected_code_fix),
+                                    len(expected_code_fix)),
+        "verificationPassRate": _rate(sum(case["verificationStatus"] == "PASSED" for case in verification_eligible),
+                                        len(verification_eligible)),
+        "averageRepairAttempts": _average([float(case.get("repairAttempts") or 0) for case in expected_code_fix]),
+        "averageLatencyMs": _average([float(case.get("latencyMs") or 0) for case in cases]),
     }
+    business_cases = [case for case in cases if case.get("evaluationLevel") == "E2E_BUSINESS"]
     return {"batchId": batch_id, "runTime": now_iso(), "totalCases": total,
             "successCases": sum(case["status"] == "SUCCESS" for case in cases),
-            "failedCases": sum(case["status"] != "SUCCESS" for case in cases),
+            "failedCases": sum(case["status"] == "FAILED" for case in cases),
+            "skippedCases": sum(case["status"] in {"SKIPPED", "NOT_EXECUTABLE"} for case in cases),
+            "businessE2ETotal": len(business_cases),
+            "baselineCompleted": sum(case.get("caseSource") == "LEGACY_BASELINE" for case in business_cases),
+            "newlyAddedCompleted": sum(case.get("caseSource") == "EVAL_EXPANSION" for case in business_cases),
+            "runtimeSafetyReliabilityCases": 10,
             "summaryMetrics": metrics, "cases": cases,
             "pipelineTrace": cases[0]["steps"] if cases else []}
 
@@ -303,8 +403,13 @@ def summary_markdown(report: dict[str, Any]) -> str:
              f"**Run Time:** {report.get('runTime', '')}", "", "## Summary", "",
              "| Metric | Value |", "|---|---|",
              f"| Total Cases | {report.get('totalCases', 0)} |",
+             f"| Business E2E Cases | {report.get('businessE2ETotal', 0)} |",
+             f"| Baseline Completed | {report.get('baselineCompleted', 0)} |",
+             f"| Newly Added Completed | {report.get('newlyAddedCompleted', 0)} |",
+             f"| Runtime Safety/Reliability Cases | {report.get('runtimeSafetyReliabilityCases', 10)} |",
              f"| Success Cases | {report.get('successCases', 0)} |",
-             f"| Failed Cases | {report.get('failedCases', 0)} |"]
+             f"| Failed Cases | {report.get('failedCases', 0)} |",
+             f"| Skipped / Not Executable | {report.get('skippedCases', 0)} |"]
     labels = (("scopeAccuracy", "Scope Accuracy"),
               ("localizationDecisionAccuracy", "Localization Decision Accuracy"),
               ("localizationTargetFileHitRate", "Localization Target File Hit Rate"),
@@ -316,7 +421,13 @@ def summary_markdown(report: dict[str, Any]) -> str:
               ("noCodeFixAccuracy", "No-Code-Fix Accuracy"),
               ("realEvidenceCoverageRate", "Real Evidence Coverage"),
               ("patchStaticSafetyRate", "Patch Static Safety Rate"),
-              ("patchSandboxIsolationRate", "Patch Sandbox Isolation Rate"))
+              ("patchSandboxIsolationRate", "Patch Sandbox Isolation Rate"),
+              ("rootCauseHitRate", "Root Cause Hit Rate"),
+              ("evidenceKeywordCoverageRate", "Evidence Keyword Coverage"),
+              ("patchGeneratedRate", "Patch Generated Rate"),
+              ("verificationPassRate", "Sandbox Verification Pass Rate"),
+              ("averageRepairAttempts", "Average Repair Attempts"),
+              ("averageLatencyMs", "Average Latency Ms"))
     lines.extend(f"| {label} | {_pct(metrics.get(key))} |" for key, label in labels)
     lines += ["", "## Case Results", "", "| Case | Scope | Status | Steps | Reflection | Patch | Compile | Test | Risk |",
               "|---|---|---|---|---|---|---|---|---|"]

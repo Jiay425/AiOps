@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","metrics":[{"name":"order_submit_invalid_request_5xx_total","value":31,"unit":"count"},{"name":"order_submit_validation_rejection_total","value":0,"unit":"count"}]}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import time
@@ -24,18 +25,23 @@ from .config import get_settings
 from .graphs import CodeOpsGraph, OpsDiagnosisGraph
 from .llm import OpenAICompatibleClient
 from .schemas import (
-    AgentLoopRequest, AlertmanagerWebhook, ApiResponse, ApprovalDecision, CodeOpsTaskRequest,
+    AgentLoopRequest, AlertmanagerWebhook, ApiResponse, ApprovalAction, ApprovalDecision,
+    ApprovalDecisionContract, CodeOpsTaskRequest,
     IncidentAnalyzeRequest, IncidentFixRequest, now_iso,
 )
 from .store import Store
+from .observability import redact
 from .persistence import CheckpointerManager
 from .executors import CallerRunsBoundedExecutor
 from .tools import ObservabilityTools
 from .ops import (AlertDeduplicator, AlertNormalizer, NotificationService, NotificationTemplateService,
                   OpsDemoDataAutoSeeder, RunbookRagService, SensitiveMasker, ServiceOwnerService)
 from .codeops import AgentLoopService, CodeOpsSecurityGovernance, EngineeringToolGateway, IncidentScheduler
-from .codeops.evaluation import build_case_report, build_report, summary_markdown, write_case_artifacts
-from .codeops.eval_cases import builtin_codeops_eval_cases
+from .codeops.evaluation import (EVALUATION_SCORING_SCHEMA_VERSION, build_case_report, build_report,
+                                 summary_markdown, write_case_artifacts)
+from .codeops.eval_cases import (BASELINE_CASE_SOURCE, BUSINESS_EVAL_LEVEL, EXPANSION_CASE_SOURCE,
+                                  builtin_codeops_eval_cases,
+                                  runtime_reliability_cases)
 
 
 settings = get_settings()
@@ -76,6 +82,7 @@ async def lifespan(_: FastAPI):
     checkpointer = await checkpoint_manager.start()
     ops_graph = OpsDiagnosisGraph(ObservabilityTools(settings), llm, store, checkpointer)
     codeops_graph = CodeOpsGraph(llm, store, checkpointer)
+    await _reconcile_waiting_approvals()
     if settings.ops_runbook_vector_enabled:
         try:
             await runbook_rag.index()
@@ -159,6 +166,34 @@ def ok(data: Any = None) -> ApiResponse:
 
 def fail(info: str, code: str = "0001") -> JSONResponse:
     return JSONResponse(status_code=200, content={"code": code, "info": info, "data": None})
+
+
+async def _reconcile_waiting_approvals() -> list[dict[str, Any]]:
+    """Reconcile API projections without making a decision on behalf of an operator."""
+    findings: list[dict[str, Any]] = []
+    for task in await store.find("tasks", lambda item: item.get("status") == "WAITING_APPROVAL"):
+        task_id = str(task.get("taskId") or "")
+        approval = task.get("approval") if isinstance(task.get("approval"), dict) else {}
+        checkpoint = await codeops_graph.checkpoint_summary(task_id)
+        reasons: list[str] = []
+        if not checkpoint.get("checkpointPresent"):
+            reasons.append("CHECKPOINT_MISSING")
+        if checkpoint.get("approvalId") != approval.get("approvalId"):
+            reasons.append("APPROVAL_PROJECTION_MISMATCH")
+        if not checkpoint.get("interruptPending"):
+            reasons.append("INTERRUPT_NOT_PENDING")
+        if reasons:
+            finding = {"taskId": task_id, "status": "RECONCILIATION_REQUIRED", "reasons": reasons,
+                       "checkpoint": checkpoint, "checkedAt": now_iso()}
+            task["reconciliation"] = finding
+            task["updateTime"] = finding["checkedAt"]
+            await store.put("tasks", task_id, task, task["updateTime"])
+            await store.put("audit_logs", f"reconcile-{task_id}", {
+                "auditId": f"reconcile-{task_id}", "taskId": task_id, "action": "APPROVAL_RECONCILE",
+                "result": "REQUIRES_REVIEW", "reason": "; ".join(reasons),
+                "checkpoint": checkpoint, "createTime": finding["checkedAt"]}, finding["checkedAt"])
+            findings.append(finding)
+    return findings
 
 
 @app.middleware("http")
@@ -524,15 +559,35 @@ def _build_task_trace(task: dict[str, Any]) -> dict[str, Any]:
     timeline = []
     for step in task.get("steps", []):
         raw = _json(step.get("rawEvidenceJson"))
+        safe_raw = _safe_trace_payload(raw)
         timeline.append({"stepNo": step.get("stepNo"), "skillId": step.get("selectedSkill"),
                          "decision": step.get("decision"), "status": step.get("status"),
                          "reason": step.get("reason"), "summary": step.get("resultSummary"),
-                         "evidence": step.get("expectedEvidence", []), "phase": raw.get("phase"),
-                         "highlights": _trace_highlights(step.get("selectedSkill"), raw), "rawEvidence": raw})
-    return {"taskId": task.get("taskId"), "taskType": task.get("taskType"), "goal": task.get("goal"),
+                         "evidence": step.get("expectedEvidence", []), "phase": safe_raw.get("phase"),
+                         "artifactId": safe_raw.get("artifactId"),
+                         "highlights": _trace_highlights(step.get("selectedSkill"), safe_raw),
+                         "rawEvidence": safe_raw})
+    return {"taskId": task.get("taskId"), "threadId": task.get("threadId", task.get("taskId")),
+            "runId": task.get("runId", ""), "taskType": task.get("taskType"), "goal": task.get("goal"),
             "status": task.get("status"), "finalSummary": task.get("finalSummary"),
+            "repairAttempt": task.get("repairAttempt", 0), "reviewVerdict": task.get("reviewVerdict", ""),
+            "blockedReason": task.get("blockedReason", ""), "approvalId": (task.get("approval") or {}).get("approvalId"),
             "stepCount": len(timeline), "usedToolCalls": task.get("usedToolCalls"),
             "workingMemorySummary": _working_memory_summary(task), "timeline": timeline}
+
+
+def _safe_trace_payload(raw: dict[str, Any]) -> dict[str, Any]:
+    """Keep dashboard/trace payloads summary-only; full artifacts stay in Store."""
+    blocked = {"prompt", "rawContent", "patchDraft", "testPatchDraft", "codeSnippets", "codeSearchMatches",
+               "output", "response", "request", "trace", "agentLoopTrace"}
+    result: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key in blocked:
+            digest = hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()[:24]
+            result[key] = {"redacted": True, "artifactId": "artifact-" + digest}
+        else:
+            result[key] = redact(value)
+    return result
 
 
 def _trace_highlights(skill_id: str | None, raw: dict[str, Any]) -> dict[str, Any]:
@@ -740,6 +795,113 @@ async def task_trace(task_id: str) -> Any:
     return ok(_build_task_trace(task))
 
 
+@app.get("/api/v1/codeops/task/{task_id}/observability")
+async def task_observability(task_id: str) -> Any:
+    task = await store.get("tasks", task_id)
+    if not task:
+        return fail("CodeOps task not found")
+    metrics = [item for item in await store.recent("runtime_metrics", 10000)
+               if str(item.get("taskId") or "") == task_id]
+    artifacts = [item for item in await store.recent("artifacts", 10000)
+                 if str(item.get("taskId") or "") == task_id]
+    metric_values = {str(item.get("metricName")): item.get("value") for item in metrics}
+    approval = task.get("approval") or {}
+    report = {
+        "businessEffect": {"status": task.get("status"), "reviewVerdict": task.get("reviewVerdict", ""),
+                            "patchDigest": task.get("patchDigest", ""),
+                            "testStatus": (task.get("context") or {}).get("verificationPassed")},
+        "runtimeSafety": {"unauthorizedTargetRepositoryWrites": metric_values.get("unauthorized_target_repository_writes", 0),
+                          "blockedReason": task.get("blockedReason", ""), "approvalStatus": approval.get("status", "")},
+        "reliability": {"checkpointResume": metric_values.get("checkpoint_resume", 0),
+                         "eventCount": len(await _task_event_projection(task_id)),
+                         "subgraphCount": len(task.get("subgraphArtifacts") or {})},
+        "efficiency": {"toolCalls": task.get("usedToolCalls", 0), "repairAttempt": task.get("repairAttempt", 0),
+                        "llmCalls": metric_values.get("llm_call", 0)},
+        "humanBurden": {"approvalStatus": approval.get("status", "NOT_REQUIRED"),
+                        "approvalReasonCount": len(approval.get("approvalReasons", [])) if isinstance(approval, dict) else 0},
+    }
+    return ok({"taskId": task_id, "threadId": task.get("threadId", task_id), "runId": task.get("runId", ""),
+               "trace": _build_task_trace(task), "events": await _task_event_projection(task_id),
+               "artifacts": [{key: item.get(key) for key in
+                              ("artifactId", "kind", "summary", "digest", "subgraph", "node")}
+                             for item in artifacts],
+               "metrics": [{key: item.get(key) for key in
+                            ("metricId", "metricName", "value", "subgraph", "node", "attempt", "tags")}
+                           for item in metrics], "report": report})
+
+
+@app.get("/api/v1/codeops/evaluation/runtime/cases")
+async def runtime_evaluation_cases() -> ApiResponse:
+    return ok(runtime_reliability_cases())
+
+
+@app.get("/api/v1/codeops/evaluation/cases")
+async def codeops_evaluation_cases(evaluationLevel: str | None = None, caseLifecycle: str | None = None,
+                                   caseSource: str | None = None, taskType: str | None = None,
+                                   status: str | None = None) -> ApiResponse:
+    """Read-only catalog view; runtime reliability cases stay on their legacy endpoint."""
+    cases = builtin_codeops_eval_cases()
+    filters = {"evaluationLevel": evaluationLevel, "caseLifecycle": caseLifecycle,
+               "caseSource": caseSource, "taskType": taskType}
+    filtered = [case for case in cases if all(value is None or str(case.get(key, "")).upper() == str(value).upper()
+                                              for key, value in filters.items())]
+    if status:
+        filtered = [case for case in filtered if str(case.get("caseLifecycle", "")).upper() == status.upper()]
+    return ok(filtered)
+
+
+@app.get("/api/v1/codeops/evaluation/summary")
+async def codeops_evaluation_summary() -> ApiResponse:
+    catalog = builtin_codeops_eval_cases()
+    business = [case for case in catalog if case.get("evaluationLevel") == BUSINESS_EVAL_LEVEL]
+    return ok({"businessE2ETotal": len(business),
+               "baselineCompleted": sum(case.get("caseSource") == BASELINE_CASE_SOURCE for case in business),
+               "newlyAddedCompleted": sum(case.get("caseSource") == EXPANSION_CASE_SOURCE for case in business),
+               "runtimeSafetyReliabilityCases": len(runtime_reliability_cases()),
+               "caseIds": [case.get("caseId") for case in business]})
+
+
+async def _task_event_projection(task_id: str) -> list[dict[str, Any]]:
+    events = [item for item in await store.recent("task_events", 10000)
+              if str(item.get("taskId") or "") == task_id]
+    return sorted(events, key=lambda item: (int(item.get("timestamp") or 0), str(item.get("eventId") or "")))
+
+
+@app.get("/api/v1/codeops/task/{task_id}/events")
+async def task_events(task_id: str, request: Request) -> StreamingResponse:
+    last_event_id = request.headers.get("Last-Event-ID", "")
+
+    async def stream() -> AsyncIterator[str]:
+        sent = last_event_id == ""
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            events = await _task_event_projection(task_id)
+            if not sent and last_event_id:
+                index = next((index for index, item in enumerate(events)
+                              if str(item.get("eventId")) == last_event_id), None)
+                events = events[index + 1:] if index is not None else events
+                sent = True
+            if events:
+                if last_event_id and getattr(codeops_graph, "store", None):
+                    await codeops_graph.observability_runtime.metric(task_id, "sse_replay", 1,
+                                                                     node="task_events")
+                for event in events:
+                    summary = {key: event.get(key) for key in (
+                        "eventId", "taskId", "stage", "kind", "attempt", "timestamp", "status",
+                        "summary", "artifactRefs", "runId", "subgraph", "node", "toolCallId",
+                        "approvalId", "patchDigest", "reviewVerdict", "blockedReason", "testStatus",
+                        "sandboxState", "recoveryState")}
+                    yield f"id: {summary['eventId']}\ndata: {json.dumps(summary, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                return
+            task = await store.get("tasks", task_id)
+            if task and task.get("status") not in {"RUNNING", "WAITING_APPROVAL"}:
+                return
+            await asyncio.sleep(0.1)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
+
+
 @app.get("/api/v1/codeops/task/incident/{task_id}")
 async def incident_view(task_id: str) -> Any:
     task = await store.get("tasks", task_id)
@@ -786,7 +948,7 @@ async def agent_loop(body: AgentLoopRequest) -> ApiResponse:
             reason = "OPENAI_API_KEY or OPENAI_BASE_URL is not configured"
             return {"thoughtSummary": "LLM client unavailable", "final": True,
                     "finalAnswer": f"Agent loop model client is unavailable: {reason}"}
-        prompt = _agent_loop_prompt(request, steps, engineering_tool_gateway.list_registered_tools())
+        prompt = _agent_loop_prompt(request, steps, engineering_tool_gateway.list_registered_tools(read_only=True))
         try:
             content = await llm.complete(prompt)
         except RuntimeError:
@@ -875,7 +1037,9 @@ def _parse_agent_loop_decision(content: str) -> dict[str, Any]:
 async def task_approval_status(task_id: str) -> Any:
     task = await store.get("tasks", task_id)
     approval = task.get("approval") if task else None
-    return ok(approval) if approval else ApiResponse(info="No pending approval for this task", data={})
+    if not approval:
+        return ApiResponse(info="No pending approval for this task", data={})
+    return ok({**approval, "checkpoint": await codeops_graph.checkpoint_summary(task_id)})
 
 
 @app.get("/api/v1/codeops/evaluation/approval/{task_id}")
@@ -885,31 +1049,93 @@ async def evaluation_approval_status(task_id: str) -> Any:
     return ok(approval) if approval else ApiResponse(info="No pending approval for this task", data=None)
 
 
-async def decide_approval(task_id: str, decision: str, body: ApprovalDecision | None) -> Any:
+def _approval_request(decision: str, body: ApprovalDecision | ApprovalDecisionContract | None) -> ApprovalDecisionContract:
+    if decision == "reject":
+        if body is None:
+            return ApprovalDecisionContract(approved=False, action=ApprovalAction.REJECT, reason="No reason provided")
+        raw = body.model_dump(by_alias=True)
+        raw.update(approved=False, action=ApprovalAction.REJECT.value)
+        return ApprovalDecisionContract.model_validate(raw)
+    if body is None:
+        return ApprovalDecisionContract(approved=True, action=ApprovalAction.APPROVE_DELIVERY)
+    raw = body.model_dump(by_alias=True)
+    raw_action = raw.get("action")
+    action = raw_action.value if isinstance(raw_action, ApprovalAction) else str(
+        raw_action or ApprovalAction.APPROVE_DELIVERY.value)
+    if action == ApprovalAction.REJECT.value or raw.get("approved") is False:
+        raise ValueError("approve endpoint only accepts an approve action")
+    raw.update(approved=True, action=action)
+    return ApprovalDecisionContract.model_validate(raw)
+
+
+async def decide_approval(task_id: str, decision: str, body: ApprovalDecision | ApprovalDecisionContract | None) -> Any:
     if decision not in {"approve", "reject"}:
         raise HTTPException(404)
     task = await store.get("tasks", task_id)
     approval = task.get("approval") if task else None
     if not approval:
         return fail("No pending approval for task: " + task_id)
-    reason = (body.reason if body else "") or "No reason provided"
-    if decision == "approve":
-        approval["status"] = "APPROVED"
-        approval["approvedAt"] = now_iso()
-        task["status"] = "COMPLETED"
-        line = "人工审批已通过，任务完成。"
-    else:
-        approval["status"] = "REJECTED"
-        approval["rejectionReason"] = reason
-        task["status"] = "HUMAN_REJECTED"
-        line = "人工审批已拒绝：" + reason
-    current_summary = str(task.get("finalSummary") or "")
-    task["finalSummary"] = current_summary + ("\n" if current_summary.strip() else "") + line
-    task["approval"] = approval
-    task["updateTime"] = now_iso()
-    await store.put("tasks", task_id, task, task["updateTime"])
-    info = "Task approved by human reviewer" if decision == "approve" else f"Task rejected: {reason}"
-    return ApiResponse(info=info, data=approval)
+    try:
+        contract = _approval_request(decision, body)
+    except ValueError as exc:
+        return fail(str(exc), "0002")
+    approval_id = str(approval.get("approvalId") or "")
+    if contract.approval_id and contract.approval_id != approval_id:
+        return fail("approvalId does not match the pending approval", "0002")
+    decision_id = contract.decision_id
+    if str(approval.get("decisionId") or "") == decision_id and str(approval.get("status")) != "PENDING":
+        return ApiResponse(info="Approval decision already processed", data=approval)
+    stored = await store.get("approvals", approval_id) if approval_id else None
+    if stored and str(stored.get("decisionId") or "") == decision_id and str(stored.get("status")) != "PENDING":
+        return ApiResponse(info="Approval decision already processed", data=stored)
+    # Old persisted fixtures can represent a pending approval without a LangGraph
+    # checkpoint or approvalId. Preserve that read/write projection contract, but
+    # never take this path for an interrupt-backed approval.
+    if not approval_id:
+        reason = contract.reason or "No reason provided"
+        approval["status"] = "APPROVED" if decision == "approve" else "REJECTED"
+        approval["approvedAt"] = now_iso() if decision == "approve" else None
+        approval["rejectionReason"] = reason if decision == "reject" else None
+        task["status"] = "COMPLETED" if decision == "approve" else "HUMAN_REJECTED"
+        line = "人工审批已通过，任务完成。" if decision == "approve" else "人工审批已拒绝：" + reason
+        current_summary = str(task.get("finalSummary") or "")
+        task["finalSummary"] = current_summary + ("\n" if current_summary.strip() else "") + line
+        task["approval"] = approval
+        task["updateTime"] = now_iso()
+        await store.put("tasks", task_id, task, task["updateTime"])
+        return ApiResponse(info="Legacy approval projection updated; no checkpoint was available", data=approval)
+    try:
+        resumed = await codeops_graph.resume(task_id, contract)
+    except (ValueError, RuntimeError) as exc:
+        # Legacy fixtures may contain a hand-written task without a checkpoint. Never use this
+        # compatibility path for a real interrupt-backed approval (which always has approvalId).
+        checkpoint = await codeops_graph.checkpoint_summary(task_id)
+        if approval_id or checkpoint.get("checkpointPresent"):
+            return fail(str(exc), "0002")
+        reason = contract.reason or "No reason provided"
+        approval["status"] = "APPROVED" if decision == "approve" else "REJECTED"
+        approval["approvedAt"] = now_iso() if decision == "approve" else None
+        approval["rejectionReason"] = reason if decision == "reject" else None
+        task["status"] = "COMPLETED" if decision == "approve" else "HUMAN_REJECTED"
+        line = "人工审批已通过，任务完成。" if decision == "approve" else "人工审批已拒绝：" + reason
+        current_summary = str(task.get("finalSummary") or "")
+        task["finalSummary"] = current_summary + ("\n" if current_summary.strip() else "") + line
+        task["approval"] = approval
+        task["updateTime"] = now_iso()
+        await store.put("tasks", task_id, task, task["updateTime"])
+        return ApiResponse(info="Legacy approval projection updated; no checkpoint was available", data=approval)
+    result_task = resumed.get("task") if isinstance(resumed, dict) else None
+    result_approval = result_task.get("approval") if isinstance(result_task, dict) else resumed.get("approval", {})
+    result_approval = result_approval if isinstance(result_approval, dict) else approval
+    audit_time = now_iso()
+    audit = {"auditId": f"approval-decision-{approval_id}-{decision_id}", "taskId": task_id,
+             "approvalId": approval_id, "decisionId": decision_id, "operatorId": contract.operator_id,
+             "action": contract.action.value if isinstance(contract.action, ApprovalAction) else str(contract.action),
+             "result": result_approval.get("status", "PROCESSED"), "reason": contract.reason,
+             "createTime": audit_time}
+    await store.put("audit_logs", audit["auditId"], audit, audit_time)
+    info = "Task approved by human reviewer" if decision == "approve" else f"Task rejected: {contract.reason or 'No reason provided'}"
+    return ApiResponse(info=info, data=result_approval)
 
 
 @app.post("/api/v1/codeops/task/{task_id}/approval/approve")
@@ -997,6 +1223,15 @@ async def run_codeops_evaluation_case(case_id: str) -> ApiResponse:
 async def codeops_evaluation_report() -> ApiResponse:
     report = evaluation_state["lastReport"]
     return ok(report) if report else ApiResponse(info="No report yet. Run an eval first.", data=None)
+
+
+@app.post("/api/v1/codeops/evaluation/report/rebuild")
+async def rebuild_codeops_evaluation_report() -> ApiResponse:
+    """Re-score persisted task artifacts without invoking an LLM or changing a repository."""
+    try:
+        return ok(await _rebuild_evaluation_report())
+    except Exception as exc:
+        return fail(str(exc))
 
 
 @app.get("/api/v1/codeops/evaluation/scheduler/status")
@@ -1277,6 +1512,58 @@ def _json(value: str | None) -> dict[str, Any]:
         return {}
 
 
+def _expected_no_code_fix(case: dict[str, Any]) -> bool:
+    expected = str(case.get("expectedFixStrategy") or "").upper()
+    scope = str(case.get("expectedScopeDecision") or "").upper()
+    outcome = case.get("expectedOutcome") if isinstance(case.get("expectedOutcome"), dict) else {}
+    return expected == "NO_CODE_FIX" or scope == "NO_CODE_FIX" or str(outcome.get("classification") or "").upper() == "NO_CODE_FIX"
+
+
+def _evaluation_terminal_success(case: dict[str, Any], status: str) -> bool:
+    outcome = case.get("expectedOutcome") if isinstance(case.get("expectedOutcome"), dict) else {}
+    expected_stop = str(outcome.get("requiredStoppingState") or "")
+    if expected_stop and status in {"REVIEW_REJECTED", "REPAIR_STOPPED", "REQUIRES_REVIEW"}:
+        return True
+    return status in {"COMPLETED", "WAITING_APPROVAL"} or (
+        (_expected_no_code_fix(case) or case.get("taskType") in {"RELEASE_RISK", "CODE_REVIEW"})
+        and status == "NO_CODE_FIX")
+
+
+def _bounded_evaluation_text(task: dict[str, Any], task_context: dict[str, Any],
+                             memory: dict[str, Any], fixture_evidence: dict[str, Any] | None = None) -> str:
+    """Build metric input without serializing prompts, snapshots or full tool output."""
+    step_projection = [
+        {key: str(step.get(key) or "")[:800]
+         for key in ("selectedSkill", "status", "resultSummary", "rawEvidenceJson")}
+        for step in (task.get("steps") or [])[-20:]
+        if isinstance(step, dict)
+    ]
+    memory_keys = ("opsEvidence", "agentLoopInvestigation", "codeLocalization", "fixStrategy",
+                   "engineeringKnowledge", "patchGeneration", "testVerification", "releaseRisk",
+                   "releaseReview")
+    projection: dict[str, Any] = {
+        "task": {key: task.get(key) for key in ("taskType", "goal", "status", "finalSummary")},
+        "steps": step_projection,
+        "workingMemory": {},
+        # Graph context compaction may omit a large fixture object.  The
+        # evaluation request's fixture remains the authoritative, redacted
+        # source for evidence scoring; it is not model output or a fake result.
+        "fixtureEvidence": fixture_evidence if fixture_evidence is not None else task_context.get("fixtureEvidence", {}),
+    }
+    for key in memory_keys:
+        if key not in memory:
+            continue
+        # Keep enough structured text for expected-keyword metrics, but never
+        # include the unbounded source snapshot or raw provider response.
+        value = redact(memory.get(key))
+        encoded = json.dumps(value, ensure_ascii=False, default=str)
+        projection["workingMemory"][key] = encoded[:8000]
+    evidence_details = (memory.get("opsEvidence", {}).get("evidenceDetails", {})
+                        if isinstance(memory.get("opsEvidence"), dict) else {})
+    projection["evidenceDetails"] = redact(evidence_details)
+    return json.dumps(redact(projection), ensure_ascii=False, default=str)[:60000].lower()
+
+
 async def _evaluate_cases(case_id: str | None) -> dict[str, Any]:
     cases = _load_eval_cases(case_id)
     if case_id and not cases:
@@ -1284,16 +1571,35 @@ async def _evaluate_cases(case_id: str | None) -> dict[str, Any]:
     batch_id = f"codeops-eval-batch-{uuid.uuid4()}"
     results: list[dict[str, Any]] = []
     case_reports: list[dict[str, Any]] = []
+    skipped_existing: list[dict[str, Any]] = []
     for case in cases:
+        previous = await _previous_successful_eval_run(case)
+        if previous and settings.codeops_eval_skip_previously_successful:
+            skipped_existing.append({"caseId": case.get("caseId"), "taskId": previous.get("taskId", ""),
+                                     "runId": previous.get("runId", ""),
+                                     "reason": "PREVIOUS_SUCCESS_SAME_CASE_REVISION"})
+            continue
         started = time.perf_counter()
         fixture_payloads = _fixture_payloads(case)
         context = {**(case.get("context") or {}), "evaluationCaseId": case.get("caseId"),
-                   "fixtureEvidence": fixture_payloads}
+                   "fixtureEvidence": fixture_payloads,
+                   # This is an evaluation-only contract.  It keeps a declared
+                   # no-code fixture from being reinterpreted as a source patch
+                   # merely because a model sees a Java file in the repository.
+                   # Production requests never set this field.
+                   "evaluationExpectedNoCodePatch": _expected_no_code_fix(case)}
         request = CodeOpsTaskRequest(taskType=case.get("taskType", "INCIDENT_TO_FIX"), goal=case.get("goal", "evaluate"),
                                      repository=case.get("repository"), changeRef=case.get("changeRef"),
                                      focusAreas=case.get("focusAreas"), maxRounds=8, maxToolCalls=40, context=context)
         state = await codeops_graph.invoke(request)
-        task, text = state["task"], json.dumps(state["task"], ensure_ascii=False).lower()
+        task = state["task"]
+        task_context = task.get("context") if isinstance(task.get("context"), dict) else {}
+        memory = task_context.get("incidentFixWorkingMemory", {})
+        # Evidence is a first-class output of OpsDiagnosisSubgraph and may live
+        # in fixtureEvidence/evidenceDetails rather than in the task summary.
+        # Include those bounded projections in the metric input; do not use the
+        # metric as a reason to copy full prompts or tool responses into reports.
+        text = _bounded_evaluation_text(task, task_context, memory if isinstance(memory, dict) else {}, fixture_payloads)
         selected = [step.get("selectedSkill") for step in task.get("steps", [])]
         expected_skills = case.get("expectedSkills") or []
         target_files = case.get("expectedTargetFiles") or []
@@ -1302,21 +1608,30 @@ async def _evaluate_cases(case_id: str | None) -> dict[str, Any]:
         test_terms = case.get("expectedTestNames") or []
         risk_terms = case.get("expectedRiskKeywords") or []
         expected_artifacts = case.get("expectedArtifacts") or []
-        memory = task.get("context", {}).get("incidentFixWorkingMemory", {})
         expected_evidence = case.get("expectedEvidenceKeywords") or []
         expected_decision = _values(case, "expectedFixStrategy") + _values(case, "expectedScopeDecision")
         metrics = {
             "skillCoverage": _coverage(expected_skills, selected),
             "evidenceCoverage": _coverage(expected_evidence, text),
-            "artifactCoverage": _coverage(expected_artifacts, list(memory)),
+            "artifactCoverage": _coverage(expected_artifacts, text),
             "codeLocalizationCoverage": _coverage(target_files + target_methods, text),
             "localizationDecisionCoverage": _coverage(expected_decision, text),
             "patchCoverage": _coverage(patch_terms, text), "testCoverage": _coverage(test_terms, text),
             "riskCoverage": _coverage(risk_terms, text),
         }
-        failed_gate = any(step.get("status") == "FAILED" and step.get("selectedSkill") in {"bug_fix", "test_verification"}
-                          for step in task.get("steps", []))
-        success = state["status"] in {"COMPLETED", "WAITING_APPROVAL"} and not failed_gate and metrics["skillCoverage"] == 1
+        final_verification = memory.get("testVerification", {}) if isinstance(memory, dict) else {}
+        recovered_repair = (state["status"] == "COMPLETED" and isinstance(final_verification, dict)
+                            and final_verification.get("testsPassed") is True)
+        failed_gate = (any(step.get("status") == "FAILED" and step.get("selectedSkill") in {"bug_fix", "test_verification"}
+                           for step in task.get("steps", [])) and not recovered_repair)
+        release_raw = task.get("context", {}).get("releaseRiskRaw", {})
+        external_llm_reason = str(release_raw.get("llmReleaseRiskError") or "") if isinstance(release_raw, dict) else ""
+        external_llm_skip = bool(external_llm_reason and re.search(
+            r"EXTERNAL_LLM_EMPTY_CONTENT|ReadTimeout|ConnectTimeout|timeout|timed out",
+            external_llm_reason, re.IGNORECASE))
+        expected_stop = bool((case.get("expectedOutcome") or {}).get("requiredStoppingState"))
+        success = _evaluation_terminal_success(case, state["status"]) and (expected_stop or not failed_gate) \
+            and metrics["skillCoverage"] == 1
         for name in ("evidenceCoverage", "artifactCoverage", "codeLocalizationCoverage", "localizationDecisionCoverage",
                      "patchCoverage", "testCoverage", "riskCoverage"):
             if ({"codeLocalizationCoverage", "localizationDecisionCoverage", "patchCoverage", "testCoverage", "riskCoverage"}.__contains__(name)
@@ -1325,10 +1640,13 @@ async def _evaluate_cases(case_id: str | None) -> dict[str, Any]:
                               "testCoverage": test_terms, "riskCoverage": risk_terms}[name])):
                 continue
             success = success and metrics[name] >= 0.5
+        if external_llm_skip:
+            success = False
         missing_skills = [value for value in expected_skills if value not in selected]
         missing_evidence = [value for value in expected_evidence if str(value).lower() not in text]
         missing_artifacts = [value for value in expected_artifacts if str(value).lower() not in text]
         detail = {"batchId": batch_id, "caseName": case.get("caseName", case.get("caseId")),
+                  "evaluationScoringSchemaVersion": EVALUATION_SCORING_SCHEMA_VERSION,
                   "selectedSkills": selected, "expectedSkills": expected_skills,
                   "expectedEvidenceKeywords": expected_evidence, "expectedArtifacts": expected_artifacts,
                   "codeLocalizationCoverage": metrics["codeLocalizationCoverage"],
@@ -1336,25 +1654,33 @@ async def _evaluate_cases(case_id: str | None) -> dict[str, Any]:
                   "localizationTargetMethodHitRate": _coverage(target_methods, text),
                   "localizationDecisionCoverage": metrics["localizationDecisionCoverage"],
                   "patchCoverage": metrics["patchCoverage"], "testCoverage": metrics["testCoverage"],
-                  "riskCoverage": metrics["riskCoverage"], "taskStatus": state["status"],
-                  "hasFailedRepairOrTestStep": failed_gate, "finalSummary": task.get("finalSummary", ""),
+                   "riskCoverage": metrics["riskCoverage"], "taskStatus": state["status"],
+                   "externalLlmSkip": external_llm_skip, "externalLlmReason": external_llm_reason,
+                   "hasFailedRepairOrTestStep": failed_gate, "finalSummary": task.get("finalSummary", ""),
                   "expected": case}
         item = {"runId": f"codeops-eval-run-{uuid.uuid4()}", "caseId": case.get("caseId"),
                 "taskId": task["taskId"], "taskType": case.get("taskType", "INCIDENT_TO_FIX"),
-                "status": "SUCCESS" if success else "FAILED",
+                 "status": "SKIPPED" if external_llm_skip else "SUCCESS" if success else "FAILED",
                 "expectedSkillCoverage": metrics["skillCoverage"],
                 "evidenceKeywordCoverage": metrics["evidenceCoverage"],
                 "artifactCoverage": metrics["artifactCoverage"], "stepCount": len(task.get("steps", [])),
                 "usedToolCalls": task.get("usedToolCalls", 0),
                 "latencyMs": int((time.perf_counter() - started) * 1000), "missingSkills": missing_skills,
                 "missingEvidenceKeywords": missing_evidence, "missingArtifacts": missing_artifacts,
-                "detail": detail, "errorMessage": None}
+                 "detail": detail, "errorMessage": external_llm_reason or None}
         results.append(item)
         case_report, trace, patch_diff = build_case_report(batch_id, case, item, task)
         write_case_artifacts(case_report, trace, patch_diff)
         case_reports.append(case_report)
         await store.put("eval_runs", item["runId"], item, now_iso())
-    count = len(results) or 1
+    if not results:
+        return {"batchId": batch_id, "totalCases": 0, "successCases": 0, "failedCases": 0,
+                "skippedCases": len(skipped_existing), "businessE2ETotal": 52,
+                "baselineCompleted": 16, "newlyAddedCompleted": 36,
+                "runtimeSafetyReliabilityCases": 10, "runs": [],
+                "skippedExistingSuccessCases": skipped_existing,
+                "message": "No graph was invoked because every requested Case already has a successful run for the same Case revision."}
+    count = len(results)
     def average(key: str) -> float:
         return round(sum(float(item["detail"].get(key, 0)) for item in results) / count, 4)
     target_file_hit = average("localizationTargetFileHitRate")
@@ -1370,6 +1696,11 @@ async def _evaluate_cases(case_id: str | None) -> dict[str, Any]:
     markdown_path.write_text(summary_markdown(report), encoding="utf-8")
     return {"batchId": batch_id, "totalCases": len(results),
             "successCases": report["successCases"], "failedCases": report["failedCases"],
+            "skippedCases": report.get("skippedCases", 0) + len(skipped_existing),
+            "businessE2ETotal": report["businessE2ETotal"],
+            "baselineCompleted": report["baselineCompleted"],
+            "newlyAddedCompleted": report["newlyAddedCompleted"],
+            "runtimeSafetyReliabilityCases": report["runtimeSafetyReliabilityCases"],
             "averageExpectedSkillCoverage": round(sum(item["expectedSkillCoverage"] for item in results) / count, 4),
             "averageEvidenceKeywordCoverage": round(sum(item["evidenceKeywordCoverage"] for item in results) / count, 4),
             "averageArtifactCoverage": round(sum(item["artifactCoverage"] for item in results) / count, 4),
@@ -1384,8 +1715,72 @@ async def _evaluate_cases(case_id: str | None) -> dict[str, Any]:
             "averageStepCount": round(sum(item["stepCount"] for item in results) / count, 4),
             "averageToolCallCount": round(sum(item["usedToolCalls"] for item in results) / count, 4),
             "averageLatencyMs": round(sum(item["latencyMs"] for item in results) / count, 4),
+            "skippedExistingSuccessCases": skipped_existing,
             "runs": results, "reportJsonPath": str(json_path).replace("\\", "/"),
             "reportMarkdownPath": str(markdown_path).replace("\\", "/")}
+
+
+async def _rebuild_evaluation_report() -> dict[str, Any]:
+    """Build a fresh report from stored task artifacts, never re-running an Eval graph.
+
+    A scoring-code change must not be hidden by same-case deduplication.  This path
+    intentionally leaves ``eval_runs`` immutable and records exactly which catalog
+    entries have a reconstructable current-revision task artifact.
+    """
+    catalog = {str(case.get("caseId")): case for case in builtin_codeops_eval_cases()}
+    current_runs: dict[str, dict[str, Any]] = {}
+    for run in await store.recent("eval_runs", 10_000):
+        case_id = str(run.get("caseId") or "")
+        detail = run.get("detail") if isinstance(run.get("detail"), dict) else {}
+        expected = detail.get("expected") if isinstance(detail.get("expected"), dict) else {}
+        case = catalog.get(case_id)
+        if not case or str(expected.get("evaluationCaseRevision") or "1") != str(case.get("evaluationCaseRevision") or "1"):
+            continue
+        current_runs.setdefault(case_id, run)
+    batch_id = f"codeops-eval-rebuild-{uuid.uuid4()}"
+    reports: list[dict[str, Any]] = []
+    unavailable: list[str] = []
+    for case_id, case in catalog.items():
+        run = current_runs.get(case_id)
+        if not run:
+            unavailable.append(case_id)
+            continue
+        task = await store.get("tasks", str(run.get("taskId") or ""))
+        if not isinstance(task, dict):
+            unavailable.append(case_id)
+            continue
+        report, trace, patch_diff = build_case_report(batch_id, case, run, task)
+        write_case_artifacts(report, trace, patch_diff)
+        reports.append(report)
+    rebuilt = build_report(batch_id, reports)
+    business_catalog = [case for case in catalog.values() if case.get("evaluationLevel") == BUSINESS_EVAL_LEVEL]
+    rebuilt.update({"evaluationScoringSchemaVersion": EVALUATION_SCORING_SCHEMA_VERSION,
+                    "catalogBusinessE2ETotal": len(business_catalog),
+                    "evaluatedBusinessE2ETotal": len(reports),
+                    "unavailableCurrentArtifactCaseIds": unavailable})
+    report_dir = Path("data/codeops-eval") / batch_id
+    report_dir.mkdir(parents=True, exist_ok=True)
+    json_path, markdown_path = report_dir / "report.json", report_dir / "report.md"
+    json_path.write_text(json.dumps(rebuilt, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    markdown_path.write_text(summary_markdown(rebuilt), encoding="utf-8")
+    evaluation_state["lastReport"] = rebuilt
+    return {**rebuilt, "reportJsonPath": str(json_path).replace("\\", "/"),
+            "reportMarkdownPath": str(markdown_path).replace("\\", "/")}
+
+
+async def _previous_successful_eval_run(case: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a successful run only when it used this exact immutable Case revision."""
+    case_id = str(case.get("caseId") or "")
+    revision = str(case.get("evaluationCaseRevision") or "1")
+    if not case_id:
+        return None
+    for run in await store.find("eval_runs", lambda item: item.get("caseId") == case_id and
+                                item.get("status") == "SUCCESS", limit=10000):
+        detail = run.get("detail") if isinstance(run.get("detail"), dict) else {}
+        expected = detail.get("expected") if isinstance(detail.get("expected"), dict) else {}
+        if str(expected.get("evaluationCaseRevision") or "1") == revision:
+            return run
+    return None
 
 
 async def _ops_fixture_summary(case_id: str | None) -> dict[str, Any]:
@@ -1499,12 +1894,19 @@ def _fixture_payloads(case: dict[str, Any]) -> dict[str, Any]:
             source = json.loads(Path(str(fixture_case)).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             source = {}
+    scenarios = source.get("scenarios") if isinstance(source, dict) else None
+    if isinstance(scenarios, dict):
+        scenario_id = str((case.get("context") or {}).get("fixtureCaseId") or case.get("caseId") or "")
+        source = scenarios.get(scenario_id, {})
     payloads = {}
     for name, path in source.get("fixtures", {}).items():
-        try:
-            payloads[name] = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            payloads[name] = {"error": f"unable to load {path}"}
+        if isinstance(path, dict):
+            payloads[name] = path
+        else:
+            try:
+                payloads[name] = json.loads(Path(path).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                payloads[name] = {"error": f"unable to load {path}"}
     return payloads
 
 

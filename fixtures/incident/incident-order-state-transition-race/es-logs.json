@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","logs":[{"level":"ERROR","traceId":"eval-state-001","message":"order state moved from PAID back to CREATED during payment retry","stack":["at com.example.order.OrderStateService.transition(OrderStateService.java:10)"]}]}

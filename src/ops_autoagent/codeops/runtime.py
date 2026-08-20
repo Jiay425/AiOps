@@ -60,7 +60,7 @@ class SecurityPolicy:
                   "repo.git_diff", "repo.git_log", "repo.find_tests", "task.background_status", "knowledge.search",
                   "ops.query_prometheus", "ops.search_logs", "ops.query_trace"}
     EXECUTE_TOOLS = {"run_tests", "compile", "repo.maven", "repo.maven_background"}
-    MUTATION_TOOLS = {"sandbox_patch", "apply_patch"}
+    MUTATION_TOOLS = {"sandbox_patch", "apply_approved_patch", "apply_patch"}
 
     BLOCKED_PATTERNS = ("rm -rf", "rm -r", "sudo", "chmod", "chown", "DROP TABLE", "DELETE FROM",
                         "TRUNCATE", "> /dev/", "dd if=", "mkfs", ":(){ :|:& };:", "wget", "curl.*-o", "eval", "$(",
@@ -68,14 +68,21 @@ class SecurityPolicy:
     ALLOWED_COMMANDS = {"mvn", "git", "java", "javac", "ls", "cat", "head", "tail", "grep",
                         "find", "diff", "wc", "echo", "mkdir"}
 
-    def authorize(self, tool: str, *, approved: bool = False, command: str = "") -> SecurityDecision:
+    def authorize(self, tool: str, *, approved: bool = False, command: str = "",
+                  legacy_direct: bool = False) -> SecurityDecision:
         if tool in self.READ_TOOLS:
             return SecurityDecision(True, "Read-only repository operation", "LOW")
         if tool in self.EXECUTE_TOOLS:
             allowed = not command or self.is_command_allowed(command)
             return SecurityDecision(allowed, "Allowlisted build/test operation" if allowed else "Command denied by policy", "MEDIUM")
-        if tool in {"sandbox_patch", "repo.exact_replace", "artifact.generate_review_report"}:
-            return SecurityDecision(True, "Mutation is isolated in a sandbox", "MEDIUM")
+        if tool == "sandbox_patch":
+            return SecurityDecision(True, "Mutation is isolated in a PatchSandbox", "MEDIUM")
+        if tool == "artifact.generate_review_report":
+            return SecurityDecision(True, "Artifact is written outside the target repository", "LOW")
+        if tool == "repo.exact_replace":
+            if legacy_direct:
+                return SecurityDecision(True, "Legacy direct gateway compatibility path", "HIGH")
+            return SecurityDecision(False, "repo.exact_replace is not available to the generic read-only agent loop", "HIGH")
         if tool == "apply_patch":
             return SecurityDecision(approved, "Human approval is required for source mutation", "HIGH", not approved)
         return SecurityDecision(False, f"Unknown or denied tool: {tool}", "HIGH")
@@ -91,12 +98,17 @@ class SecurityPolicy:
         if not repository or not relative_path or Path(relative_path).is_absolute():
             return False
         root = Path(repository).resolve()
-        target = (root / relative_path).resolve()
+        candidate = root / relative_path
+        parts = relative_path.replace("\\", "/").split("/")
+        if any(root.joinpath(*parts[:index]).is_symlink() for index in range(1, len(parts) + 1)):
+            return False
+        target = candidate.resolve()
         try:
             target.relative_to(root / "src" if source_only else root)
         except ValueError:
             return False
-        return not any(part.lower() in {".git", ".ssh"} for part in target.parts) and target.name.lower() != ".env"
+        return (not any(part.lower() in {".git", ".ssh"} for part in target.parts)
+                and target.name.lower() != ".env" and not candidate.is_symlink())
 
     def governance_summary(self) -> dict[str, Any]:
         return {"policyVersion": "codeops-agent-permission-v1",
@@ -315,7 +327,10 @@ class RepositoryToolkit:
     def safe_path(self, relative_path: str) -> Path:
         if not relative_path or Path(relative_path).is_absolute():
             raise PermissionError("Only a non-empty repository-relative path is allowed")
-        resolved = (self.root / relative_path).resolve()
+        candidate = self.root / relative_path
+        if candidate.is_symlink() or any(parent.is_symlink() for parent in candidate.parents if parent != self.root.parent):
+            raise PermissionError(f"Symbolic links are not allowed in repository paths: {relative_path}")
+        resolved = candidate.resolve()
         try:
             resolved.relative_to(self.root)
         except ValueError as exc:
@@ -394,9 +409,7 @@ class PatchScopeGuard:
             violations.append("METHOD_OUT_OF_SCOPE: STRICT_SINGLE_METHOD patch changes multiple methods")
         if scope_type in {"STRICT_SINGLE_METHOD", "MULTI_METHOD"} and target_methods:
             for method in changed_methods:
-                bare = method.rsplit(".", 1)[-1]
-                if bare != "<STRUCTURE>" and not any(method == item or method.endswith("." + item) or item.endswith("." + bare)
-                                                      for item in target_methods):
+                if not self._method_in_scope(method, target_methods):
                     violations.append(f"METHOD_OUT_OF_SCOPE: {method} not in {target_methods}")
         failure = "" if not violations else violations[0].split(":", 1)[0]
         return {"passed": not violations, "failureType": failure, "touchedFiles": touched,
@@ -406,9 +419,19 @@ class PatchScopeGuard:
     @staticmethod
     def _changed_methods(path: str, old: str, new: str) -> list[str]:
         class_name = Path(path).stem
+        if path.lower().endswith(".java"):
+            old_java, new_java = PatchScopeGuard._java_method_bodies(old), PatchScopeGuard._java_method_bodies(new)
+            if old_java or new_java:
+                changed_java = sorted(name for name in set(old_java) | set(new_java)
+                                      if old_java.get(name) != new_java.get(name))
+                return [f"{class_name}.{name}" for name in changed_java] or (
+                    [f"{class_name}.<STRUCTURE>"] if old != new else [])
         patterns = [
             r"(?m)^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(",
-            r"(?m)^\s*(?:public|protected|private|static|final|synchronized|\s)+[\w<>\[\], ?]+\s+([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:throws[^\{]+)?\{",
+            # A Java method needs an explicit return type.  Do not let generic
+            # whitespace in the modifier part turn control statements such as
+            # ``if (...) {`` into fake method declarations.
+            r"(?m)^\s*(?:(?:public|protected|private|static|final|synchronized|abstract|native|strictfp)\s+)*(?!(?:class|interface|enum|record)\b)(?:[A-Za-z_$][\w$]*(?:\s*<[^>{}()]+>)?(?:\s*\[\])?)\s+([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*(?:throws\s+[^\{]+)?\{",
             r"(?m)^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(",
         ]
         old_names, new_names = set(), set()
@@ -420,6 +443,46 @@ class PatchScopeGuard:
             common = old_names & new_names
             changed = sorted(common) if len(common) == 1 else ["<STRUCTURE>"]
         return [f"{class_name}.{name}" for name in changed]
+
+    @staticmethod
+    def _java_method_bodies(content: str) -> dict[str, str]:
+        """Return Java method bodies for complete-file patch comparisons.
+
+        The scope guard deliberately fails closed when it cannot attribute a
+        changed complete Java file to methods.  This lightweight parser is not a
+        compiler; it only establishes a conservative patch boundary.
+        """
+        declaration = re.compile(
+            r"(?m)^\s*(?:(?:public|protected|private|static|final|synchronized|abstract|native|strictfp)\s+)*"
+            r"(?!(?:class|interface|enum|record)\b)(?:[A-Za-z_$][\w$]*(?:\s*<[^>{}()]+>)?(?:\s*\[\])?)\s+([A-Za-z_$][\w$]*)\s*"
+            r"\([^;{}]*\)\s*(?:throws\s+[^\{]+)?\{")
+        result: dict[str, str] = {}
+        for match in declaration.finditer(content or ""):
+            start, depth, index = match.start(), 0, match.end() - 1
+            while index < len(content):
+                if content[index] == "{":
+                    depth += 1
+                elif content[index] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        result[match.group(1)] = content[start:index + 1]
+                        break
+                index += 1
+        return result
+
+    @staticmethod
+    def _method_in_scope(method: str, target_methods: list[str]) -> bool:
+        """Compare method identities independent of an optional Java signature."""
+        bare = method.rsplit(".", 1)[-1]
+        if bare == "<STRUCTURE>":
+            return True
+        identity = method.split("(", 1)[0]
+        for target in target_methods:
+            target_identity = str(target).split("(", 1)[0]
+            target_bare = target_identity.rsplit(".", 1)[-1]
+            if identity == target_identity or bare == target_bare:
+                return True
+        return False
 
 
 class PatchValidation:
@@ -595,6 +658,7 @@ class PatchSandbox:
 
     def apply_to_repository(self, proposal: PatchProposal, expected_checksums: dict[str, str]) -> list[str]:
         changed: list[str] = []
+        prepared: list[tuple[Path, str, str]] = []
         for patch in proposal.patches:
             target = self._safe_target(self.repository, patch.path)
             original = target.read_text(encoding="utf-8")
@@ -605,8 +669,10 @@ class PatchSandbox:
             expected = expected_checksums.get(patch.path)
             if expected and digest != expected:
                 raise RuntimeError(f"Sandbox checksum mismatch: {patch.path}")
+            prepared.append((target, updated, patch.path))
+        for target, updated, path in prepared:
             target.write_text(updated, encoding="utf-8", newline="")
-            changed.append(patch.path)
+            changed.append(path)
         return changed
 
     @staticmethod
@@ -628,7 +694,10 @@ class PatchSandbox:
     def _safe_target(root: Path, relative: str) -> Path:
         if Path(relative).is_absolute() or not relative:
             raise PermissionError("Patch path must be repository-relative")
-        target = (root / relative).resolve()
+        candidate = root / relative
+        if candidate.is_symlink() or any(parent.is_symlink() for parent in candidate.parents if parent != root.parent):
+            raise PermissionError(f"Patch target cannot traverse a symbolic link: {relative}")
+        target = candidate.resolve()
         try:
             target.relative_to(root.resolve())
         except ValueError as exc:
@@ -679,7 +748,8 @@ class TestRunner:
             return ["npm", "test", "--", "--runInBand"]
         return None
 
-    async def run(self, root: str | Path, command: list[str] | None = None, timeout_seconds: int = 120) -> TestResult:
+    async def run(self, root: str | Path, command: list[str] | None = None, timeout_seconds: int = 120,
+                  environment: dict[str, str] | None = None) -> TestResult:
         root_path = Path(root).resolve()
         selected = command or self.detect(root_path)
         if not selected:
@@ -691,6 +761,7 @@ class TestRunner:
         started = loop.time()
         process = await asyncio.create_subprocess_exec(
             *selected, cwd=root_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            env=environment,
         )
         try:
             output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
@@ -742,8 +813,11 @@ class EngineeringToolGateway:
     def is_tool_allowed(self, tool_name: str) -> bool:
         return tool_name in self._definitions and self._definitions[tool_name].enabled
 
-    def list_registered_tools(self) -> list[dict[str, Any]]:
-        return [item.to_dict() for item in self.DEFINITIONS if item.tool_name in self.REGISTRY_TOOLS]
+    def list_registered_tools(self, *, read_only: bool = False) -> list[dict[str, Any]]:
+        tools = [item for item in self.DEFINITIONS if item.tool_name in self.REGISTRY_TOOLS]
+        if read_only:
+            tools = [item for item in tools if item.access_level == "READ_ONLY"]
+        return [item.to_dict() for item in tools]
 
     def is_registered_tool(self, tool_name: str) -> bool:
         return tool_name in self.REGISTRY_TOOLS and self.is_tool_allowed(tool_name)
@@ -754,7 +828,9 @@ class EngineeringToolGateway:
         if definition is None:
             raise KeyError(f"Unknown engineering tool: {tool_name}")
         command = " ".join(str(item) for item in arguments.get("args", []))
-        decision = self.security.authorize(tool_name, approved=approved, command=f"mvn {command}" if tool_name.startswith("repo.maven") else command)
+        decision = self.security.authorize(
+            tool_name, approved=approved, command=f"mvn {command}" if tool_name.startswith("repo.maven") else command,
+            legacy_direct=tool_name == "repo.exact_replace" and self.runtime.current_task() is None)
         if tool_name == "repo.exact_replace" and not self.security.is_write_allowed(
                 arguments.get("repository", "."), str(arguments.get("filePath", "")), source_only=True):
             decision = SecurityDecision(False, "Write target is outside allowed repository source scope", "HIGH")

@@ -27,6 +27,8 @@ LEGACY_ENV_TO_FIELD = {
     "CODEOPS_LLM_PRO_ESCALATION_ENABLED": "codeops_llm_pro_escalation_enabled",
     "CODEOPS_TEST_EXECUTION_ENABLED": "codeops_test_execution_enabled",
     "CODEOPS_TEST_EXECUTION_TIMEOUT_MS": "codeops_test_execution_timeout_ms",
+    "CODEOPS_JAVA_HOME": "codeops_java_home",
+    "CODEOPS_EVAL_SKIP_PREVIOUSLY_SUCCESSFUL": "codeops_eval_skip_previously_successful",
     "CODEOPS_PATCH_SANDBOX_ENABLED": "codeops_patch_sandbox_enabled",
     "CODEOPS_PATCH_SANDBOX_BASE_DIR": "codeops_patch_sandbox_base_dir",
     "CODEOPS_PATCH_SANDBOX_PREFER_GIT_WORKTREE": "codeops_patch_sandbox_prefer_git_worktree",
@@ -62,13 +64,20 @@ LEGACY_ENV_TO_FIELD = {
 
 
 def audit() -> dict[str, object]:
+    if not FULL_PROFILE.exists():
+        # The Java compatibility module is optional in this Python checkout. Do not
+        # turn an absent module into a false placeholder failure; expose the fact
+        # explicitly so CI/reporting can distinguish "not present" from "not mapped".
+        return {"legacyPlaceholders": 0, "mappedPlaceholders": 0, "missing": [],
+                "invalidFields": [], "profileAvailable": False, "profilePath": str(FULL_PROFILE)}
     placeholders = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", FULL_PROFILE.read_text(encoding="utf-8")))
     fields = set(Settings.model_fields)
     missing_mapping = sorted(placeholders - LEGACY_ENV_TO_FIELD.keys())
     invalid_fields = sorted(f"{key}->{field}" for key, field in LEGACY_ENV_TO_FIELD.items()
                             if key in placeholders and field not in fields)
     return {"legacyPlaceholders": len(placeholders), "mappedPlaceholders": len(placeholders) - len(missing_mapping),
-            "missing": missing_mapping, "invalidFields": invalid_fields}
+            "missing": missing_mapping, "invalidFields": invalid_fields, "profileAvailable": True,
+            "profilePath": str(FULL_PROFILE)}
 
 
 def main() -> int:

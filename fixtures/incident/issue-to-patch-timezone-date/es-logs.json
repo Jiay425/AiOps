@@ -1,0 +1,1 @@
+{"dataClass":"TEST_SIMULATED_DATA","service":"order-service","logs":[{"level":"ERROR","traceId":"eval-timezone-001","message":"orderDate mismatch instant=2025-12-31T23:30:00Z customerZone=Asia/Shanghai expected=2026-01-01 actual=2025-12-31","stack":["at com.example.order.OrderDateService.toOrderDate(OrderDateService.java:10)"]}]}

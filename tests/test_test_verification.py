@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
 
 from ops_autoagent.codeops.test_verification import TestPatchApplier, TestVerificationService
-from ops_autoagent.codeops.runtime import PatchSandbox
+from ops_autoagent.codeops.runtime import PatchSandbox, TestResult as MavenResult, TestRunner
 from ops_autoagent.config import Settings
 from ops_autoagent.graphs.codeops import CodeOpsGraph
 from ops_autoagent.llm import OpenAICompatibleClient
@@ -47,6 +48,47 @@ async def test_disabled_execution_records_java_compatible_skipped_background_tas
     assert raw["testExecutionResults"] == ["真实测试执行未开启：设置 codeops.test.execution.enabled=true 后会运行推荐 Maven 命令。"]
     assert {item["status"] for item in raw["backgroundToolTasks"]} == {"SKIPPED"}
     assert {item["type"] for item in raw["taskNotifications"]} == {"BACKGROUND_TASK_SKIPPED"}
+
+
+@pytest.mark.asyncio
+async def test_declared_eval_commands_are_not_replaced_by_test_plan_llm(tmp_path: Path):
+    settings = Settings(codeops_agent_test_verification_llm_enabled=True)
+
+    class TestPlanLlm:
+        available = True
+
+        async def complete(self, _prompt: str, **_kwargs) -> str:
+            return '{"recommendedTests":["broad"],"coverageGaps":[],"mavenCommands":["mvn -q test"],"verificationNotes":[]}'
+
+    service = TestVerificationService(TestPlanLlm(), settings)
+    declared = ["mvn -q -DskipTests compile", "mvn -q -Dtest=OrderQueryServiceTest test"]
+    result = await service._plan(
+        {"taskId": "fixture", "taskType": "ISSUE_TO_PATCH", "goal": "pagination",
+         "context": {"evaluationTestCommands": declared}},
+        {}, {}, {},
+        {"repositoryPath": str(tmp_path), "changeRef": "working_tree", "changedFiles": [],
+         "relatedTestFiles": [], "recommendedTests": [], "coverageGaps": [], "mavenCommands": declared,
+         "verificationNotes": []},
+        merged=False,
+    )
+    assert result["success"] is True
+    assert result["plan"]["mavenCommands"] == declared
+
+
+@pytest.mark.asyncio
+async def test_bugfix_compile_gate_uses_configured_java_home(tmp_path: Path, monkeypatch):
+    settings = Settings(codeops_java_home="D:/Java/jdk17")
+    graph = CodeOpsGraph(OpenAICompatibleClient(settings))
+    captured: dict[str, str] = {}
+
+    async def compile_with_environment(_self, _root, _command, _timeout, environment=None):
+        captured.update(environment or {})
+        return MavenResult(command=["mvn", "compile"], status="PASSED", exit_code=0, output="", duration_ms=1)
+
+    monkeypatch.setattr(TestRunner, "run", compile_with_environment)
+    result = await graph._compile_gate(str(tmp_path), source_valid=True)
+    assert result["success"] is True
+    assert captured["JAVA_HOME"] == "D:/Java/jdk17"
 
 
 @pytest.mark.asyncio
@@ -175,6 +217,24 @@ async def test_bugfix_agent_prompt_parses_complete_file_rewrite_contract(tmp_pat
     assert result["bugfixAgent"]["rootCause"] == "wrong result"
     assert result["patch_proposal"]["patches"][0]["old"] == "class OrderService { int submit() { return 1; } }\n"
     assert "return 2" in result["patch_proposal"]["patches"][0]["new"]
+
+
+def test_bugfix_parser_deduplicates_rewrite_and_exact_replace_for_same_file(tmp_path: Path):
+    source = tmp_path / "src/main/java/example/OrderService.java"
+    source.parent.mkdir(parents=True)
+    original = "class OrderService { int submit() { return 1; } }\n"
+    source.write_text(original, encoding="utf-8")
+    payload = {
+        "fileRewrites": [{"filePath": "src/main/java/example/OrderService.java",
+                          "newContent": "class OrderService { int submit() { return 2; } }\n"}],
+        "exactReplaceBlocks": [{"filePath": "src/main/java/example/OrderService.java",
+                                "oldText": "return 1;", "newText": "return 2;"}],
+    }
+    parsed = CodeOpsGraph(OpenAICompatibleClient(Settings()))._parse_bugfix_agent(json.dumps(payload), str(tmp_path))
+    patches = parsed["proposal"]["patches"]
+    assert len(patches) == 1
+    assert patches[0]["old"] == original
+    assert "return 2" in patches[0]["new"]
 
 
 def test_bugfix_agent_unified_diff_fallback_becomes_isolated_production_patch(tmp_path: Path):

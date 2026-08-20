@@ -1,0 +1,8 @@
+{
+  "dataClass": "TEST_SIMULATED_DATA",
+  "index": "order-service-*",
+  "hits": [
+    {"timestamp": "2026-08-15T18:35:00+08:00", "level": "WARN", "service": "order-service", "message": "signature invalid callbackId=cb-test-2048 receivedKeyVersion=v2026-08 configuredKeyVersion=v2026-07", "traceId": "trace-payment-signature-2048"},
+    {"timestamp": "2026-08-15T18:35:01+08:00", "level": "INFO", "service": "payment-gateway", "message": "webhook signing key-version rotated to v2026-08", "traceId": "trace-payment-signature-2048"}
+  ]
+}

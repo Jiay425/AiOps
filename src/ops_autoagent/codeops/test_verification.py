@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -286,12 +287,17 @@ class TestVerificationService:
         waiting = _bool(current_context.get("asyncTestExecution")) and bool(queued)
         failed = self._failed(execution)
         compile_failed = self._compile_failed(execution)
+        read_only_review = task.get("taskType") in {"CODE_REVIEW", "RELEASE_RISK"} and not patch_generation
         rolled_back = False
         if apply_result["applied"] and failed and (compile_failed or self._touches_test(execution, validation["touchedFiles"])):
             rolled_back = self._restore(plan["repositoryPath"], snapshot) or self._delete(plan["repositoryPath"], new_files)
         tests_passed = self._passed(execution)
         required_but_failed = _bool(current_context.get("allowTestPatchApply")) and patch_result["success"] and bool(test_patch_text) and not apply_result["applied"]
-        status = "WAITING_BACKGROUND_TASK" if waiting else "FAILED" if required_but_failed or failed else (
+        # A failed test against an unchanged repository is valuable evidence in
+        # a read-only review/release-risk task.  Record it faithfully but do
+        # not turn the reviewer workflow itself into a failed repair attempt.
+        baseline_failure_reported = bool(read_only_review and failed and not required_but_failed)
+        status = "WAITING_BACKGROUND_TASK" if waiting else "FAILED" if required_but_failed or (failed and not baseline_failure_reported) else (
             "SUCCESS" if tests_passed or _bool(diff.get("diffAvailable")) else "NO_DIFF")
         summary = (f"已生成测试验证计划并提交后台 Maven 验证：{len(queued)} 个任务运行中。" if waiting else
                    f"已生成测试验证计划：建议测试 {len(plan['recommendedTests'])} 项，覆盖缺口 {len(plan['coverageGaps'])} 项。")
@@ -316,6 +322,8 @@ class TestVerificationService:
                "testFailureType": self._failure_type(output) if failed else "", "failedCommands": self._failed_commands(output),
                "failedTestFiles": self._failed_files(output), "failedAssertions": self._failed_assertions(output),
                "rawFailureSummary": _truncate(output, 1500), "testsPassed": tests_passed,
+               "baselineFailureReported": baseline_failure_reported,
+               "verificationDisposition": "BASELINE_FAILURE_REPORTED" if baseline_failure_reported else "EXECUTED",
                "repairObservations": current_context.get("repairObservations", [])}
         next_context = {**current_context, "backgroundToolTasks": background_tasks, "taskNotifications": notifications,
                         "verificationPassed": tests_passed, "verificationOutput": output,
@@ -328,10 +336,12 @@ class TestVerificationService:
     def _baseline(self, task: dict[str, Any], diff: dict[str, Any], localization: dict[str, Any], repository: str,
                   related: list[str]) -> dict[str, Any]:
         changed = _values(diff.get("changedFiles"))
+        configured_commands = _values((task.get("context") or {}).get("evaluationTestCommands"))
         return {"repositoryPath": repository, "changeRef": _text(diff.get("changeRef"), "working_tree"),
                 "changedFiles": changed, "relatedTestFiles": related,
                 "recommendedTests": self._recommended(changed, related, localization),
-                "coverageGaps": self._gaps(changed, related, localization), "mavenCommands": self._commands(related),
+                "coverageGaps": self._gaps(changed, related, localization),
+                "mavenCommands": configured_commands or self._commands(related),
                 "verificationNotes": [f"验证计划基于任务目标“{_text(task.get('goal'), '未提供')}”和 diff 上下文生成。",
                                       "当前 diff 摘要：" + _text(diff.get("diffSummary"), "无 diff 摘要"),
                                       "如果修复来自线上故障，还应补充可观测指标或日志断言作为上线观察项。"],
@@ -339,9 +349,10 @@ class TestVerificationService:
 
     async def _plan(self, task: dict[str, Any], diff: dict[str, Any], localization: dict[str, Any], patch: dict[str, Any],
                     baseline: dict[str, Any], merged: bool) -> dict[str, Any]:
+        configured_commands = _values((task.get("context") or {}).get("evaluationTestCommands"))
         if merged:
             return {"plan": {**baseline, "recommendedTests": _values(patch.get("testSuggestions")) or baseline["recommendedTests"],
-                            "mavenCommands": _values(patch.get("mavenCommands")) or baseline["mavenCommands"],
+                            "mavenCommands": configured_commands or _values(patch.get("mavenCommands")) or baseline["mavenCommands"],
                             "verificationNotes": ["测试计划来自合并后的 Code Repair & Test Agent 输出，未额外调用 Test Plan LLM。"]},
                     "success": False, "fallback": True,
                     "reasoning": [], "error": "Incident-to-Fix uses the combined Code Repair & Test Agent output; no separate Test Plan LLM call is made."}
@@ -362,6 +373,11 @@ class TestVerificationService:
                 raise ValueError("LLM output was not JSON")
             plan = {**baseline, **{key: _values(parsed.get(key)) for key in
                                    ("recommendedTests", "coverageGaps", "mavenCommands", "verificationNotes")}}
+            # Evaluation commands are a declared contract for a local fixture.
+            # An LLM may suggest a broader command, but must not silently replace
+            # that contract with an expensive or unrelated test suite.
+            if configured_commands:
+                plan["mavenCommands"] = configured_commands
             return {"plan": plan, "success": True, "fallback": False, "reasoning": _values(parsed.get("reasoning")), "error": ""}
         except Exception as exc:
             return {"plan": baseline, "success": False, "fallback": True,
@@ -600,12 +616,23 @@ class TestVerificationService:
         command = ["mvn.cmd" if __import__("os").name == "nt" else "mvn", *args]
         started = time.perf_counter()
         try:
-            result = await TestRunner().run(repository, command, max(1, int(getattr(self.settings, "codeops_test_execution_timeout_ms", 120000)) // 1000))
+            result = await TestRunner().run(
+                repository, command,
+                max(1, int(getattr(self.settings, "codeops_test_execution_timeout_ms", 120000)) // 1000),
+                self._test_environment(),
+            )
             return {"command": result.command, "success": result.status == "PASSED", "exitCode": result.exit_code,
                     "costMillis": result.duration_ms, "output": result.output}
         except Exception as exc:
             return {"command": ["mvn", *args], "success": False, "exitCode": -1,
                     "costMillis": int((time.perf_counter() - started) * 1000), "output": str(exc)}
+
+    def _test_environment(self) -> dict[str, str]:
+        environment = dict(os.environ)
+        java_home = _text(getattr(self.settings, "codeops_java_home", ""))
+        if java_home:
+            environment["JAVA_HOME"] = java_home
+        return environment
 
     def _record_task(self, task: dict[str, Any], tasks: list[dict[str, Any]], notifications: list[dict[str, Any]],
                      command: str, status: str, summary: str, args: list[str], artifacts: dict[str, Any]) -> dict[str, Any]:
