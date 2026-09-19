@@ -8,7 +8,7 @@
 
 # Ops AutoAgent Diagnosis
 
-### 面向证据链故障修复的持久化 LangGraph AIOps 编排控制面
+### 从告警到自动修复的 LangGraph Agent
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#快速开始)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.2.9-1C3C3C?logo=langchain&logoColor=white)](#langgraph-运行时)
@@ -16,21 +16,21 @@
 [![Checkpoints](https://img.shields.io/badge/执行-SQLite%20%7C%20PostgreSQL-336791?logo=postgresql&logoColor=white)](#持久化执行)
 [![Eval](https://img.shields.io/badge/评测-52%2B%20业务案例-6E40C9)](#评测体系)
 
-**从线上信号出发，经过可追溯诊断、可审查补丁和测试门禁，最终交付受控修复结果。**
+**从告警开始，完成故障诊断、代码定位、补丁生成、测试验证和人工审批。**
 
 </div>
 
 ---
 
-## 为什么做这个项目？
+## 它是怎么工作的？
 
-生产故障修复不是一次 LLM 调用就能完成的事情。一个可用的 AIOps
-系统必须从多个线上观测面采集证据，保留推理上下文，理解真实代码仓库，
-约束补丁范围，执行编译和测试，并在真正产生副作用之前停在人工可控的边界。
+线上出现告警后，Agent 会先读取监控指标、日志、调用链和 Runbook，
+再让 LLM 判断最可能的故障原因。接着，它会去代码仓库中定位相关文件和方法，
+在受控沙箱里生成补丁，执行编译和测试，最后交给独立的代码审查 Agent。
+只有人工审批后，补丁才可能被应用到目标仓库。
 
-Ops AutoAgent Diagnosis 是从 Spring AI/Spring Boot 运行时迁移出的
-Python 原生项目。这里把 LangGraph 当作执行模型，而不是把 LLM 当成一个
-可以无限调用工具的聊天机器人：
+这个项目是从 Spring AI/Spring Boot 迁移到 Python + LangGraph 的版本。
+LangGraph 负责保存每一步状态、控制 Agent 循环、暂停等待审批，以及在中断后继续执行：
 
 ~~~text
 故障 / Issue / Code Task
@@ -45,32 +45,31 @@ Python 原生项目。这里把 LangGraph 当作执行模型，而不是把 LLM 
                             编译 / 测试验证
                                      │
                                      ▼
-                            独立发布审查
+                            独立代码审查
                                      │
                              人工审批 / 仅交付
 ~~~
 
-最终得到的是一个可检查、可回放、可限制重试、可安全交接的有状态 Agent
-Harness，而不是一个能够直接修改生产仓库的模型。
+简单说，它就是一个“从告警到自动修复”的 Agent，但每一步都能查看、回放和限制。
+模型只能提出修改建议，不能直接改生产代码。
 
 ## 核心亮点
 
 | | 能力 | 含义 |
 | --- | --- | --- |
-| 🧭 | 证据驱动诊断 | 在生成诊断结论前，明确采集并记录 Metrics、Logs、Traces 和 Runbook 证据。 |
-| 🧩 | 图原生编排 | Typed State、Conditional Edge、Fan-out/Fan-in、嵌套子图和有界反馈循环都是运行时的一等概念。 |
-| 🧠 | 三角色修复路径 | 故障到修复路径分离诊断、修复和独立审查职责。 |
-| 🧱 | 契约化子图 | 证据、仓库调查、补丁提案、验证和审查分别发布经过校验的领域契约。 |
-| ⏸️ | 持久化 Human-in-the-loop | <code>interrupt()</code> 暂停图执行；使用同一个 <code>thread_id</code> 和 <code>Command(resume=...)</code> 恢复。 |
-| 🔐 | 单一副作用边界 | 模型只能提出变更，只有 <code>apply_approved_patch</code> 可以修改目标仓库。 |
-| 🧪 | 测试门禁交付 | 补丁范围、编译/测试结果、审查事实、审批状态和 Patch Digest 会贯穿整个图状态。 |
-| 📊 | 可追踪评测 | 52 条业务 E2E Case、10 条运行时安全/可靠性 Case、事件回放、Artifacts 和运行时指标彼此隔离。 |
+| 🧭 | 先看证据再下结论 | 先采集 Metrics、Logs、Traces 和 Runbook，再生成故障诊断。 |
+| 🔎 | 自动定位代码 | Agent 通过只读工具搜索仓库、查看调用关系和相关测试。 |
+| 🛠️ | 自动生成补丁 | 补丁先在受控沙箱中生成和校验，不直接写入目标仓库。 |
+| 🧪 | 编译和测试 | 修改后自动执行验证，并把结果交给审查 Agent。 |
+| ⏸️ | 人工审批 | <code>interrupt()</code> 可以暂停流程，审批后使用同一个 <code>thread_id</code> 继续。 |
+| 🔐 | 安全写入边界 | 只有 <code>apply_approved_patch</code> 可以真正修改目标仓库。 |
+| 📊 | 可复盘评测 | 52 条业务 E2E Case、10 条安全/可靠性 Case，以及完整的事件和运行时指标。 |
 
 ## 架构
 
-运行时包含两个顶层图入口。<code>CodeOpsGraph</code> 是故障修复控制面；
-<code>OpsDiagnosisGraph</code> 是保留的独立运维诊断图，负责事件分析和
-SSE 流式输出。CodeOps 可以复用证据契约，但不会让观测工具直接负责修改代码仓库。
+项目包含两个顶层图入口。<code>CodeOpsGraph</code> 负责从故障诊断走到代码修复；
+<code>OpsDiagnosisGraph</code> 是独立的运维诊断入口，负责采集线上信息、生成诊断报告
+和输出 SSE 事件。两者可以共享证据结果，但线上观测工具不会直接修改代码仓库。
 
 ~~~mermaid
 flowchart LR
@@ -122,7 +121,7 @@ flowchart LR
 
 ## 图拓扑
 
-### <code>CodeOpsGraph</code> —— 修复控制面
+### <code>CodeOpsGraph</code> —— 自动修复流程
 
 ~~~text
 START
@@ -161,7 +160,7 @@ Orchestrator 根据任务类型、Working Memory、已执行 Skill、关注范�
 | <code>RepositoryInvestigationSubgraph</code> | <code>prepare_input → readonly_investigation → publish_contract</code> | 只读执行仓库搜索、快照、文件片段、Diff、历史、测试和工程知识检索。 |
 | <code>RepairProposalSubgraph</code> | <code>prepare_input → sandbox_repair_proposal → publish_contract</code> | 在受管 Patch Sandbox 内生成并校验补丁提案。 |
 | <code>VerificationSubgraph</code> | <code>prepare_input → run_verification → publish_contract</code> | 把编译、测试和后台任务事实规范化为验证契约。 |
-| <code>IndependentReviewSubgraph</code> | <code>prepare_input → review_patch_facts → publish_contract</code> | 校验独立发布审查契约，并对不安全的发布结论降级。 |
+| <code>IndependentReviewSubgraph</code> | <code>prepare_input → review_patch_facts → publish_contract</code> | 校验独立代码审查结果，并对不安全的发布结论降级。 |
 
 这种拆分让工作流可以被检查：一个 Checkpoint 同时可以展示父图当前节点和
 子图产生的领域制品。
@@ -219,7 +218,7 @@ LLM 意图
   → Scope Guard + Patch Validation
   → 受管 Patch Sandbox
   → 编译和测试验证
-  → 独立发布审查
+  → 独立代码审查
   → 人工审批 Interrupt
   → 交付制品或 apply_approved_patch
   → 目标仓库

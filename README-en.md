@@ -8,7 +8,7 @@
 
 # Ops AutoAgent Diagnosis
 
-### A durable LangGraph control plane for evidence-grounded incident-to-fix automation
+### A LangGraph agent that turns alerts into tested, reviewable fixes
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#quick-start)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.2.9-1C3C3C?logo=langchain&logoColor=white)](#langgraph-runtime)
@@ -16,22 +16,23 @@
 [![Checkpoints](https://img.shields.io/badge/Execution-SQLite%20%7C%20PostgreSQL-336791?logo=postgresql&logoColor=white)](#durable-execution)
 [![Eval](https://img.shields.io/badge/Evaluation-52%2B%20business%20cases-6E40C9)](#evaluation)
 
-**From an operational signal to a traceable diagnosis, reviewable patch, and test-gated delivery.**
+**Start with an alert. Diagnose the fault, find the code, generate a patch, run tests, and wait for approval.**
 
 </div>
 
 ---
 
-## Why this project?
+## How does it work?
 
-Production repair is not a single LLM call. A useful AIOps system has to collect
-evidence from several operational surfaces, preserve the reasoning context,
-inspect the real repository, constrain the patch, verify the result, and stop
-at a human-controlled effect boundary.
+When an alert fires, the agent reads metrics, logs, traces, and runbook context,
+then asks an LLM to identify the most likely cause. It searches the repository
+for the relevant files and methods, creates a patch inside a managed sandbox,
+runs compilation and tests, and sends the result to an independent review agent.
+The target repository is only changed after a human approves it.
 
-Ops AutoAgent Diagnosis is a Python-native migration of a Spring AI/Spring Boot
-runtime. It uses LangGraph as the execution model rather than treating the LLM
-as an unbounded chatbot:
+This is the Python + LangGraph migration of the original Spring AI/Spring Boot
+runtime. LangGraph keeps the state for every step, controls the agent loops,
+pauses for approval, and resumes the same task after an interruption:
 
 ~~~text
 Incident / code task
@@ -46,35 +47,34 @@ Evidence bundle ──► structured diagnosis ──► repository investigatio
                                       compile / test verification
                                                │
                                                ▼
-                                      independent release review
+                                      independent code review
                                                │
                                human approval / delivery-only output
 ~~~
 
-The result is a stateful agent harness designed for inspection, replay,
-bounded retries, and safe hand-off—not a model with direct write access to a
-production repository.
+In short, this is an agent that turns an alert into an automated fix, while
+keeping every step inspectable, replayable, and bounded. The model can propose
+a change, but it cannot directly modify production code.
 
 ## Highlights
 
 | | Capability | What it means |
 | --- | --- | --- |
-| 🧭 | Evidence-grounded diagnosis | Metrics, logs, traces, and runbooks are collected as explicit evidence before a diagnosis is emitted. |
-| 🧩 | Graph-native orchestration | Typed state, conditional edges, fan-out/fan-in, nested subgraphs, and bounded feedback loops are first-class runtime concepts. |
-| 🧠 | Three-role remediation path | The incident-to-fix path separates diagnosis, repair, and independent review responsibilities. |
-| 🧱 | Contracted subgraphs | Evidence, repository investigation, repair proposal, verification, and review each publish a validated domain contract. |
-| ⏸️ | Durable human-in-the-loop | <code>interrupt()</code> pauses execution; the same <code>thread_id</code> resumes it with <code>Command(resume=...)</code>. |
-| 🔐 | Single effect boundary | Models can propose changes, but only <code>apply_approved_patch</code> can mutate the target repository. |
-| 🧪 | Test-gated delivery | Patch scope, compile/test results, review facts, approval state, and patch digests are carried through the graph. |
-| 📊 | Traceable evaluation | 52 business E2E cases, 10 runtime safety/reliability cases, event replay, artifacts, and runtime metrics are kept separate from raw prompts. |
+| 🧭 | Evidence before conclusions | Collect metrics, logs, traces, and runbooks before generating a diagnosis. |
+| 🔎 | Automatic code localization | Read-only repository tools search code, call paths, and related tests. |
+| 🛠️ | Automatic patch generation | A patch is created and validated in a managed sandbox, never written directly to the target repository. |
+| 🧪 | Compile and test | The change is verified before the review agent sees it. |
+| ⏸️ | Human approval | <code>interrupt()</code> pauses the workflow; the same <code>thread_id</code> resumes it after approval. |
+| 🔐 | Safe write boundary | Only <code>apply_approved_patch</code> can actually modify the target repository. |
+| 📊 | Replayable evaluation | 52 business E2E cases, 10 safety/reliability cases, and complete event/runtime metrics. |
 
 ## Architecture
 
-The runtime has two top-level graph surfaces. <code>CodeOpsGraph</code> is the remediation
-control plane; <code>OpsDiagnosisGraph</code> remains a standalone observability-compatible
-diagnosis surface for incident analysis and SSE streaming. The CodeOps path can
-reuse the evidence contract without making an observability tool directly
-responsible for repository changes.
+The project has two top-level graph entry points. <code>CodeOpsGraph</code> takes an incident
+from diagnosis to code repair. <code>OpsDiagnosisGraph</code> is the standalone operations
+diagnosis entry point: it collects online evidence, writes a diagnosis report, and
+streams SSE events. They can share evidence results, but the observability tools
+never directly modify the repository.
 
 ~~~mermaid
 flowchart LR
@@ -127,7 +127,7 @@ effects. The agents do not bypass those policies by calling tools directly.
 
 ## Graph topology
 
-### <code>CodeOpsGraph</code> — remediation control plane
+### <code>CodeOpsGraph</code> — automated repair workflow
 
 ~~~text
 START
