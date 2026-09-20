@@ -120,7 +120,7 @@ class IncidentFixOrchestratorPolicy:
         if not m.get("testVerification") and self.TEST not in done:
             return self._call(self.TEST, "代码审查后需要补充验证计划。")
         if not m.get("releaseRisk") and self.RELEASE not in done:
-            return self._call(self.RELEASE, "只读审查与基线验证已完成，交由独立 Reviewer 输出风险结论和人工复核点。")
+            return self._call(self.RELEASE, "Code-Review 的代码理解、知识补充、审查和测试验证阶段均已完成或已尝试。")
         return self._stop("Code-Review 的代码理解、知识补充、审查和测试验证阶段均已完成或已尝试。")
 
     def _needs_agent_loop(self, memory, done, context, incident=False):

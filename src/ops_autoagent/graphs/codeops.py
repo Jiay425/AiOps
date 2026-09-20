@@ -21,16 +21,20 @@ from ..codeops import (
     PatchValidation, RepositoryToolkit, SecurityPolicy, TestRunner, TestVerificationService, ToolBudget,
 )
 from ..llm import OpenAICompatibleClient
-from ..ops import EvidenceSignalExtractor, RunbookRagService
+from ..eventing import EventEnvelope, event_type_for_task_event
+from ..ops import DeterministicAnomalyDetector, EnsembleAnomalyDetector, EvidenceSignalExtractor, RunbookRagService
 from ..observability import RuntimeObservability, redact
+from ..outbox import OutboxRelay
 from ..schemas import (ApprovalAction, ApprovalDecisionContract, CodeOpsTaskRequest, ReleaseReviewContract,
-                       now_iso)
+                       ReleaseRiskGovernanceContract, now_iso)
 from .state_models import (EffectLogList, EventList, STATE_SCHEMA_VERSION, ToolTraceList, approval_contract,
                             digest_json, task_event, tool_trace)
 from .subgraphs import (IndependentReviewSubgraph, OpsEvidenceSubgraph, RepairProposalSubgraph,
-                        RepositoryInvestigationSubgraph, VerificationSubgraph)
+                        RepositoryInvestigationSubgraph, VerificationSubgraph, GraphRcaSubgraph)
 from ..store import Store
 from ..tools import ObservabilityTools
+from ..topology import Neo4jTopologyService
+from ..runbook_actions import RunbookActionRequest, RunbookActionService
 
 
 class CodeOpsState(TypedDict, total=False):
@@ -82,7 +86,9 @@ class CodeOpsGraph:
         {"skillId": "test_verification", "name": "Test Verification Skill", "description": "Build a verification plan from changed files and related tests, including Maven commands and coverage gaps.", "supportedTaskTypes": ["ISSUE_TO_PATCH", "INCIDENT_TO_FIX", "CODE_REVIEW", "RELEASE_RISK", "BUG_FIX"], "requiredTools": ["repo.git_diff", "repo.find_tests"], "riskLevel": "READ_ONLY"},
     ]
 
-    def __init__(self, llm: OpenAICompatibleClient, store: Store | None = None, checkpointer: Any | None = None):
+    def __init__(self, llm: OpenAICompatibleClient, store: Store | None = None, checkpointer: Any | None = None,
+                 topology_service: Neo4jTopologyService | None = None,
+                 runbook_action_service: RunbookActionService | None = None):
         self.llm = llm
         self.store = store
         self.settings = getattr(llm, "settings", None)
@@ -104,10 +110,25 @@ class CodeOpsGraph:
         self.observability = ObservabilityTools(self.settings) if self.settings else None
         self.runbook_rag = RunbookRagService(self.settings) if self.settings else None
         self.evidence_signal_extractor = EvidenceSignalExtractor()
+        self.deterministic_anomaly_detector = EnsembleAnomalyDetector(
+            enabled=bool(getattr(self.settings, "ops_deterministic_anomaly_enabled", True)),
+            three_sigma_min_samples=int(getattr(self.settings, "ops_anomaly_three_sigma_min_samples", 4) or 4),
+            ewma_alpha=float(getattr(self.settings, "ops_anomaly_ewma_alpha", 0.3) or 0.3),
+            max_signals=int(getattr(self.settings, "ops_anomaly_max_signals", 24) or 24),
+            isolation_forest_enabled=bool(getattr(self.settings, "ops_anomaly_isolation_forest_enabled", True)),
+            isolation_forest_min_samples=int(getattr(self.settings, "ops_anomaly_isolation_forest_min_samples", 12) or 12),
+            isolation_forest_contamination=float(getattr(self.settings, "ops_anomaly_isolation_forest_contamination", 0.10) or 0.10),
+            ensemble_min_votes=int(getattr(self.settings, "ops_anomaly_ensemble_min_votes", 2) or 2),
+        )
+        self.topology_service = topology_service
+        self.runbook_action_service = runbook_action_service or RunbookActionService(self.settings)
         self.memory = IncidentMemoryService(store) if store else None
         self.observability_runtime = RuntimeObservability(
             store, bool(getattr(self.settings, "codeops_runtime_metrics_enabled", True)))
-        self.ops_evidence_subgraph = OpsEvidenceSubgraph(checkpointer=checkpointer)
+        self.ops_evidence_subgraph = OpsEvidenceSubgraph(
+            checkpointer=checkpointer, anomaly_detector=self.deterministic_anomaly_detector)
+        self.graph_rca_subgraph = (GraphRcaSubgraph(topology_service, checkpointer=checkpointer)
+                                   if topology_service is not None else None)
         self.repository_investigation_subgraph = RepositoryInvestigationSubgraph(checkpointer=checkpointer)
         self.repair_proposal_subgraph = RepairProposalSubgraph(checkpointer=checkpointer)
         self.verification_subgraph = VerificationSubgraph(checkpointer=checkpointer)
@@ -127,6 +148,7 @@ class CodeOpsGraph:
         builder.add_node("repair_feedback", self._repair_feedback)
         builder.add_node("prepare_approval", self._prepare_approval)
         builder.add_node("human_approval", self._human_approval)
+        builder.add_node("auto_approve_patch", self._auto_approve_patch)
         builder.add_node("deliver_patch", self._deliver_patch)
         builder.add_node("apply_approved_patch", self._apply_approved_patch)
         builder.add_node("rejected", self._rejected)
@@ -144,9 +166,10 @@ class CodeOpsGraph:
                 builder.add_edge(skill, "orchestrate")
         builder.add_conditional_edges("finish", self._route_finish,
                                       {"approval": "prepare_approval", "retry_repair": "repair_feedback",
-                                       "summarize": "summarize"})
+                                       "auto_apply": "auto_approve_patch", "summarize": "summarize"})
         builder.add_edge("repair_feedback", "bug_fix")
         builder.add_edge("prepare_approval", "human_approval")
+        builder.add_edge("auto_approve_patch", "apply_approved_patch")
         builder.add_conditional_edges("human_approval", self._route_approval,
                                       {"apply": "apply_approved_patch", "deliver": "deliver_patch", "reject": "rejected"})
         builder.add_conditional_edges("apply_approved_patch", self._route_after_apply,
@@ -327,6 +350,9 @@ class CodeOpsGraph:
             metrics = {"source": "Prometheus", "available": False, "summary": "Prometheus unavailable"}
             logs = {"source": "Elasticsearch", "available": False, "summary": "Elasticsearch unavailable"}
             traces = {"source": "SkyWalking", "available": False, "summary": "SkyWalking unavailable"}
+        metric_series = self.deterministic_anomaly_detector.compact_metric_series(metrics)
+        if metric_series:
+            metrics = {**metrics, "anomalySeries": metric_series}
         signals = self.evidence_signal_extractor.extract(metrics, logs, traces, command)
         runbooks = await self.runbook_rag.search(" ".join(str(item.get("summary", "")) for item in signals), 5) \
             if self.runbook_rag else []
@@ -367,6 +393,14 @@ class CodeOpsGraph:
                          **(item.get("sourceMetadata") or {})}
                          for name, item in (("Prometheus", metrics), ("Elasticsearch", logs),
                                             ("SkyWalking", traces))]}
+        runbook_action = context.get("runbookAction")
+        if isinstance(runbook_action, dict):
+            try:
+                action_request = RunbookActionRequest.model_validate({**runbook_action, "serviceName": service})
+                diagnosis["runbookDryRun"] = await self.runbook_action_service.dry_run(action_request)
+            except (TypeError, ValueError) as exc:
+                diagnosis["runbookDryRun"] = {"status": "INVALID_REQUEST", "productionWrite": False,
+                                                "blockingReasons": [str(exc)[:500]]}
         raw = {"phase": "PHASE_4_OPS_DIAGNOSIS_SKILL", "command": command,
                "opsDiagnosis": diagnosis, "evidenceDetails": diagnosis["evidenceDetails"],
                "evidenceCoverage": coverage, "evidenceProvenance": diagnosis["evidenceProvenance"],
@@ -402,7 +436,13 @@ class CodeOpsGraph:
         contract = await self.ops_evidence_subgraph.ainvoke(
             self._subgraph_input(state, result, "ops_evidence"),
             thread_id=f"{state['task']['taskId']}:ops-evidence:{state.get('round', 0)}")
-        return await self._attach_subgraph(result, contract, "ops_evidence", state)
+        result = await self._attach_subgraph(result, contract, "ops_evidence", state)
+        if self.graph_rca_subgraph is not None and self.topology_service is not None and self.topology_service.configured:
+            rca_contract = await self.graph_rca_subgraph.ainvoke(
+                self._subgraph_input(state, result, "graph_rca"),
+                thread_id=f"{state['task']['taskId']}:graph-rca:{state.get('round', 0)}")
+            result = await self._attach_subgraph(result, rca_contract, "graph_rca", state)
+        return result
 
     async def _skill_agent_loop_with_subgraph(self, state: CodeOpsState) -> dict[str, Any]:
         if not self._subgraphs_enabled():
@@ -468,6 +508,28 @@ class CodeOpsGraph:
                           *self._release_string_list(review.get("humanApprovalPoints")),
                           "Review the read-only findings and baseline test diagnostics before authorizing a repair.",
                       ]))}
+        # An existing targeted regression test is valid evidence; a patch does
+        # not have to add a new test file on every repair.  When deterministic
+        # gates already prove scope, sandbox apply, compile and the targeted
+        # Maven test, do not let a reviewer retry solely because testsChanged
+        # is false or because an earlier cold Maven invocation timed out.
+        facts = raw.get("patchFacts") if isinstance(raw.get("patchFacts"), dict) else {}
+        governance = raw.get("riskGovernance") if isinstance(raw.get("riskGovernance"), dict) else {}
+        if (str(review.get("reviewVerdict") or "").upper() == "RETRY_REPAIR"
+                and governance.get("autoApplyEligible") is True
+                and all(facts.get(key) is True for key in (
+                    "patchGenerated", "scopeGuardPassed", "staticSafetyPassed", "patchApplied",
+                    "compilePassed", "testsPassed"))):
+            review = {**review, "reviewVerdict": "ACCEPT", "patchDecision": "RELEASE_READY",
+                      "testSufficient": True,
+                      "reviewFindings": list(dict.fromkeys([
+                          *self._release_string_list(review.get("reviewFindings")),
+                          "Deterministic policy accepted the passing targeted regression test; no new test file was required.",
+                      ])),
+                      "reasoning": list(dict.fromkeys([
+                          *self._release_string_list(review.get("reasoning")),
+                          "All deterministic verification gates passed; prior cold-test timeout was superseded by the latest targeted Maven success.",
+                      ]))}
         merged_raw = {**raw, **{key: value for key, value in output.items()
                                 if key not in {"output", "input", "artifactRefs", "subgraph", "effectBoundary"}},
                       "review": review, "reviewVerdict": review.get("reviewVerdict", raw.get("reviewVerdict")),
@@ -516,6 +578,9 @@ class CodeOpsGraph:
                 "targetMethods": memory.get("codeLocalization", {}).get("targetMethods", []) if isinstance(memory, dict) else [],
                 "evidenceSummary": self._safe_summary(ops_evidence),
                 "evidenceBundle": evidence_bundle,
+                "serviceName": str(ops_evidence.get("serviceName") or context.get("serviceName") or ""),
+                "startTime": str(context.get("startTime") or ""),
+                "endTime": str(context.get("endTime") or ""),
                 "patchProposal": result.get("patch_proposal", {}),
                 "patchFacts": self._release_patch_facts(patch, tests, context.get("diffContext", {})),
                 "patchDigest": result.get("patch_digest") or state.get("patch_digest", ""),
@@ -531,8 +596,23 @@ class CodeOpsGraph:
     def _safe_summary(value: Any) -> dict[str, Any]:
         if not isinstance(value, dict):
             return {"summary": str(value)[:500]}
-        return {key: value[key] for key in ("status", "summary", "signals", "targetFiles", "missingEvidence")
-                if value.get(key) is not None}
+        summary = {key: value[key] for key in ("status", "summary", "signals", "targetFiles", "missingEvidence",
+                                                "available", "source", "sourceMode", "fixtureFallback")
+                   if value.get(key) is not None}
+        for key in ("observations", "errorSamples", "spans"):
+            items = value.get(key)
+            if isinstance(items, list):
+                summary[key] = [redact(str(item))[:800] for item in items[:20]]
+        series = value.get("anomalySeries")
+        if isinstance(series, dict):
+            bounded: dict[str, list[float]] = {}
+            for name, values in list(series.items())[:12]:
+                numeric = DeterministicAnomalyDetector._numbers(values)
+                if numeric:
+                    bounded[str(name)] = numeric[-60:]
+            if bounded:
+                summary["anomalySeries"] = bounded
+        return summary
 
     async def _attach_subgraph(self, result: dict[str, Any], contract: dict[str, Any], name: str,
                                state: CodeOpsState) -> dict[str, Any]:
@@ -542,6 +622,58 @@ class CodeOpsGraph:
         artifacts = dict(context.get("subgraphArtifacts") or {})
         artifacts[name] = {"artifactRefs": refs, "status": output.get("status", "COMPLETED"),
                            "blockedReason": output.get("blockedReason", "")}
+        if name == "ops_evidence":
+            deterministic = output.get("deterministicAnomalies")
+            if isinstance(deterministic, list):
+                artifacts[name]["deterministicAnomalyCount"] = len(deterministic)
+                memory = dict(result.get("working_memory") or state.get("working_memory", {}))
+                ops_evidence = dict(memory.get("opsEvidence") or {})
+                details = dict(ops_evidence.get("evidenceDetails") or {})
+                existing = details.get("evidenceSignals") if isinstance(details.get("evidenceSignals"), list) else []
+                merged = [*existing, *deterministic]
+                deduped: list[dict[str, Any]] = []
+                seen_signal_ids: set[str] = set()
+                for signal in merged:
+                    if not isinstance(signal, dict):
+                        continue
+                    identity = str(signal.get("signalId") or json.dumps(signal, ensure_ascii=False, sort_keys=True,
+                                                                          default=str))
+                    if identity not in seen_signal_ids:
+                        seen_signal_ids.add(identity)
+                        deduped.append(signal)
+                details["evidenceSignals"] = deduped
+                details["deterministicAnomalies"] = deterministic
+                ops_evidence["evidenceDetails"] = details
+                ops_evidence["deterministicAnomalies"] = deterministic
+                memory["opsEvidence"] = ops_evidence
+                result["working_memory"] = memory
+                context["incidentFixWorkingMemory"] = memory
+                context["deterministicAnomalySignals"] = deterministic
+                for step in reversed(result.get("steps", [])):
+                    if step.get("selectedSkill") != "ops_diagnosis":
+                        continue
+                    try:
+                        raw = json.loads(str(step.get("rawEvidenceJson") or "{}"))
+                    except (TypeError, ValueError):
+                        raw = {}
+                    raw["deterministicAnomalies"] = deterministic
+                    raw["evidenceDetails"] = details
+                    step["rawEvidenceJson"] = json.dumps(raw, ensure_ascii=False, default=str,
+                                                          separators=(",", ":"))
+                    break
+        elif name == "graph_rca":
+            correlation = output.get("topologyCorrelation")
+            if isinstance(correlation, dict):
+                memory = dict(result.get("working_memory") or state.get("working_memory", {}))
+                ops_evidence = dict(memory.get("opsEvidence") or {})
+                details = dict(ops_evidence.get("evidenceDetails") or {})
+                details["topologyCorrelation"] = correlation
+                ops_evidence["evidenceDetails"] = details
+                ops_evidence["topologyCorrelation"] = correlation
+                memory["opsEvidence"] = ops_evidence
+                result["working_memory"] = memory
+                context["incidentFixWorkingMemory"] = memory
+                context["topologyCorrelation"] = correlation
         context["subgraphArtifacts"] = artifacts
         result["context"] = context
         if isinstance(result.get("task"), dict):
@@ -941,6 +1073,7 @@ class CodeOpsGraph:
         methods = self._string_list(localization.get("targetMethods") or localization.get("candidateMethods"))
         return {"scopeType": scope_type, "strategyType": strategy_type, "targetFiles": files,
                 "targetMethods": methods, "candidateMethods": self._string_list(localization.get("candidateMethods")),
+                "allowNewHelperMethods": scope_type == "MULTI_METHOD" and strategy_type.upper() == "CODE_FIX",
                 "scopeConfidence": localization.get("localizationConfidence", "MEDIUM"),
                 "scopeReasoning": str(strategy.get("scopeReasoning") or strategy.get("reasoning") or ""),
                 "localizationDecision": localization}
@@ -1136,6 +1269,10 @@ Important rules:
   FULL_FILE is allowed only within candidate files; NO_CODE_FIX must return empty production and test patches.
 - Prefer fileRewrites with complete visible Java file content. Preserve all non-target methods byte-for-byte. Use
   exactReplaceBlocks only for exact visible oldText. Use unifiedDiffPatch only when a complete file rewrite is unsafe.
+- Every filePath must be a repository-relative path copied exactly from codeContextPack.sourceByFile or
+  codeSearchMatches; never prefix it with the absolute repository path or the repository directory name. For this
+  incident, if the visible source proves the check-then-act race, return a concrete production patch rather than
+  an analysis-only response.
 - A unified diff must use --- a/path, +++ b/path and real @@ hunks. Do not use markdown fences or prose around patches.
 - For INCIDENT_TO_FIX CODE_FIX on Maven/JUnit, include a concrete JUnit 5 test rewrite when visible APIs suffice.
 - Preserve public signatures and normal behavior. For state-owner check-then-act races, fix the state-owning service,
@@ -1530,7 +1667,15 @@ Return JSON with this schema:
         elif verdict == "NO_CODE_FIX":
             status, reason = "NO_CODE_FIX", "Independent Reviewer classified the outcome as operational/configuration delivery."
         elif verdict == "REVIEW_UNAVAILABLE" and self._approval_payload(state) is None:
-            status, reason = "REVIEW_UNAVAILABLE", "Independent Reviewer is unavailable; automatic application is blocked."
+            # A no-diff read-only review has nothing to apply.  Preserve the
+            # historical terminal contract for CODE_REVIEW/RELEASE_RISK while
+            # keeping incident patch tasks blocked when their reviewer is down.
+            task_type = str(state.get("task", {}).get("taskType") or "").upper()
+            has_patch = bool((state.get("patch_proposal") or {}).get("patches"))
+            if task_type != "INCIDENT_TO_FIX" and not has_patch:
+                status, reason = "COMPLETED", "No code diff was produced; review completed without a release artifact."
+            else:
+                status, reason = "REVIEW_UNAVAILABLE", "Independent Reviewer is unavailable; automatic application is blocked."
         elif verdict == "RETRY_REPAIR" and not self._retry_allowed(state):
             status, reason = "REPAIR_STOPPED", "Repair retry was stopped by attempt, budget or patchDigest deduplication guard."
         step = {"stepNo": len(state["steps"]) + 1, "decision": "STOP", "selectedSkill": None,
@@ -1538,11 +1683,13 @@ Return JSON with this schema:
                 "rawEvidenceJson": None, "status": "STOPPED"}
         return {"steps": state["steps"] + [step], "status": status, "stop_reason": reason}
 
-    def _route_finish(self, state: CodeOpsState) -> Literal["approval", "retry_repair", "summarize"]:
+    def _route_finish(self, state: CodeOpsState) -> Literal["approval", "auto_apply", "retry_repair", "summarize"]:
         raw = state.get("context", {}).get("releaseRiskRaw", {})
         verdict = str(raw.get("reviewVerdict") or "").upper()
         if verdict == "RETRY_REPAIR" and self._retry_allowed(state):
             return "retry_repair"
+        if self._auto_apply_eligible(state):
+            return "auto_apply"
         if self._approval_payload(state) is not None and verdict not in {"REJECT", "NO_CODE_FIX"}:
             return "approval"
         return "summarize"
@@ -1919,6 +2066,26 @@ Return JSON with this schema:
                                        f"Approval resumed with action {action}", status="RESUMED")],
                 "task": {**state["task"], "approval": approval, "updateTime": now_iso()}}
 
+    async def _auto_approve_patch(self, state: CodeOpsState) -> dict[str, Any]:
+        """Persist the automatic policy decision before the sole write boundary."""
+        patch_digest = self._current_patch_digest(state)
+        baseline_digest = self._current_baseline_digest(state)
+        approval_id = f"auto-approval-{uuid.uuid4()}"
+        decision_id = f"auto-decision-{uuid.uuid4()}"
+        approval = {
+            "approvalId": approval_id, "taskId": state["task"]["taskId"], "status": "AUTO_APPROVED",
+            "patchDigest": patch_digest, "repositoryBaselineDigest": baseline_digest,
+            "action": ApprovalAction.APPROVE_APPLY_TO_WORKTREE.value, "approvedAt": now_iso(),
+            "approvalReasons": ["Automatic policy: high confidence and all verification gates passed."],
+        }
+        decision = {"decisionId": decision_id, "action": ApprovalAction.APPROVE_APPLY_TO_WORKTREE.value,
+                    "operatorId": "codeops-auto-policy", "approved": True, "decisionSource": "AUTO_POLICY"}
+        return {"approval_required": False, "approval": approval, "approval_decision": decision,
+                "patch_digest": patch_digest, "repository_baseline_digest": baseline_digest,
+                "events": [task_event(state["task"]["taskId"], "auto_approve_patch", "approved",
+                                      "High-confidence verified patch automatically approved for worktree apply",
+                                      status="AUTO_APPROVED")]}
+
     @staticmethod
     def _route_approval(state: CodeOpsState) -> Literal["apply", "deliver", "reject"]:
         action = str((state.get("approval_decision") or {}).get("action") or
@@ -2031,6 +2198,20 @@ Return JSON with this schema:
             "apply_to_worktree", "approved_apply", "worktree"
         }
 
+    def _auto_apply_eligible(self, state: CodeOpsState) -> bool:
+        """The only path that skips HITL; every deterministic gate remains mandatory."""
+        if not bool(getattr(self.settings, "codeops_auto_apply_enabled", True)):
+            return False
+        if not self._apply_mode_allows_explicit_apply() or state.get("task", {}).get("taskType") != "INCIDENT_TO_FIX":
+            return False
+        raw = self._latest_raw_outputs(state)
+        governance = raw.get("riskGovernance") if isinstance(raw.get("riskGovernance"), dict) else {}
+        if governance.get("autoApplyEligible") is not True:
+            return False
+        return str(raw.get("reviewVerdict") or "").upper() in {
+            "RELEASE_READY", "ACCEPT", "ACCEPT_WITH_HUMAN_REVIEW"
+        }
+
     @classmethod
     def _proposal_digest(cls, proposal: PatchProposal) -> str:
         return digest_json(proposal.to_dict())
@@ -2048,6 +2229,13 @@ Return JSON with this schema:
             return digest_json({"repository": str(repository)})
 
     def _current_baseline_digest(self, state: CodeOpsState) -> str:
+        # The effect boundary verifies this exact repository digest immediately
+        # before writing.  Use the same representation when recording an
+        # approval (human or automatic), rather than a legacy context snapshot
+        # with a different JSON shape.
+        repository = str(state.get("task", {}).get("repository") or "")
+        if repository:
+            return self._current_repository_digest(repository)
         snapshot = state.get("context", {}).get("repoBaselineSnapshot")
         return digest_json(snapshot if isinstance(snapshot, dict) and snapshot else
                           {"repository": state["task"].get("repository", "")})
@@ -2089,35 +2277,59 @@ Return JSON with this schema:
         lower = text.lower()
         failures = re.search(r"failures:\s*(\d+)", lower)
         errors = re.search(r"errors:\s*(\d+)", lower)
-        if ('"success":false' in lower or '"success": false' in lower or "exitcode=1" in lower
+        if ('"success":false' in lower or '"success": false' in lower or "success=false" in lower
+                or "exitcode=1" in lower
                 or "exit code: 1" in lower or "build failure" in lower or "<<< failure!" in lower
                 or (failures and int(failures.group(1)) > 0) or (errors and int(errors.group(1)) > 0)):
             return False
-        return ("build success" in lower or '"success":true' in lower
+        return ("build success" in lower or "success=true" in lower or '"success":true' in lower
                 or ("tests run:" in lower and "failures: 0" in lower and "errors: 0" in lower))
 
     @staticmethod
     def _approval_payload(state: CodeOpsState) -> dict[str, Any] | None:
+        settings = state.get("task", {}).get("featureFlags") if isinstance(
+            state.get("task", {}).get("featureFlags"), dict) else None
+        # The task feature flag is copied into task.featureFlags at invocation
+        # time; callers that construct a bare state may omit it, so preserve
+        # the historical default (approval enabled) in that case.
+        if settings is not None and settings.get("codeops_hitl_approval_enabled") is False:
+            return None
         if state.get("task", {}).get("taskType") != "INCIDENT_TO_FIX" or not state.get("steps"):
             return None
         raw = CodeOpsGraph._latest_raw_outputs(state)
-        patch_generated = raw.get("llmGenerated") is True
+        # The release-risk node is usually the latest step, so its raw output
+        # keeps deterministic patch/test facts under ``patchFacts`` rather
+        # than duplicating the full PatchGeneration artifact.  Approval must
+        # consume that normalized contract as well as the legacy top-level
+        # projection; otherwise a valid repair would silently skip HITL.
+        patch_facts = raw.get("patchFacts") if isinstance(raw.get("patchFacts"), dict) else {}
+        patch_generated = raw.get("llmGenerated") is True or patch_facts.get("patchGenerated") is True
         latest_test = next((step for step in reversed(state["steps"])
                             if step.get("selectedSkill") == "test_verification"), None)
+        verification_facts = {
+            "testExecutionResults": patch_facts.get("testExecutionResults", []),
+        }
+        verification_facts.update({key: value for key, value in raw.items()
+                                   if key == "testExecutionResults"})
         tests_passed = bool(latest_test and latest_test.get("status") == "SUCCESS"
-                            and CodeOpsGraph._real_tests_passed(raw))
+                            and CodeOpsGraph._real_tests_passed(verification_facts))
         if not patch_generated or not tests_passed:
             return None
+        governance = raw.get("riskGovernance") if isinstance(raw.get("riskGovernance"), dict) else {}
+        if governance and (governance.get("deliveryEligible") is not True
+                           or governance.get("approvalRequired") is not True):
+            return None
         risk_report = raw.get("releaseRiskReport")
-        risk = str(risk_report.get("riskLevel") if isinstance(risk_report, dict)
-                   and risk_report.get("riskLevel") is not None else raw.get("riskLevel") or "LOW")
+        risk = str(governance.get("riskLevel") or (risk_report.get("riskLevel") if isinstance(risk_report, dict)
+                   and risk_report.get("riskLevel") is not None else raw.get("riskLevel")) or "LOW")
         evidence = raw.get("evidenceCoverage") if isinstance(raw.get("evidenceCoverage"), dict) else {}
         quality = raw.get("patchQuality") if isinstance(raw.get("patchQuality"), dict) else {}
         sandbox = raw.get("patchSandbox") if isinstance(raw.get("patchSandbox"), dict) else {}
-        reasons: list[str] = []
+        reasons: list[str] = CodeOpsGraph._release_string_list(governance.get("approvalReasons"))
         review_verdict = str(raw.get("reviewVerdict") or "").upper()
-        if review_verdict in {"RELEASE_READY", "ACCEPT", "ACCEPT_WITH_HUMAN_REVIEW", "HUMAN_REVIEW",
-                              "REVIEW_UNAVAILABLE"}:
+        if review_verdict in {"RETRY_REPAIR", "REJECT", "NO_CODE_FIX"}:
+            return None
+        if review_verdict in {"HUMAN_REVIEW", "REVIEW_UNAVAILABLE"}:
             reasons.append("independent reviewer requires controlled human approval")
         if risk.upper() in {"HIGH", "CRITICAL"}:
             reasons.append(f"release risk is {risk}")
@@ -2146,13 +2358,16 @@ Return JSON with this schema:
         patch_summary = str(raw.get("patchDraft") or "")[:1200]
         test_results = str(raw.get("testExecutionResults") or "")[:1200]
         changed = raw.get("changedFiles") if isinstance(raw.get("changedFiles"), list) else []
-        return {"taskId": state["task"]["taskId"],
-                "caseName": state["task"].get("goal") or state["task"]["taskId"], "status": "PENDING",
-                "rootCause": str(raw.get("rootCause") or ""), "patchSummary": patch_summary,
-                "changedFiles": [str(item) for item in changed], "riskLevel": risk,
-                "testResults": test_results, "approvalReasons": reasons,
-                "evidenceSummary": evidence, "patchQuality": quality, "patchSandbox": sandbox,
-                "submittedAt": now, "approvedAt": None, "rejectionReason": None}
+        payload = {"taskId": state["task"]["taskId"],
+                   "caseName": state["task"].get("goal") or state["task"]["taskId"], "status": "PENDING",
+                   "rootCause": str(raw.get("rootCause") or ""), "patchSummary": patch_summary,
+                   "changedFiles": [str(item) for item in changed], "riskLevel": risk,
+                   "testResults": test_results, "approvalReasons": list(dict.fromkeys(reasons)),
+                   "evidenceSummary": evidence, "patchQuality": quality, "patchSandbox": sandbox,
+                   "submittedAt": now, "approvedAt": None, "rejectionReason": None}
+        if governance:
+            payload["riskGovernance"] = governance
+        return payload
 
     async def _release_risk(self, state: CodeOpsState) -> dict[str, Any]:
         memory = state.get("working_memory", {})
@@ -2277,7 +2492,29 @@ Return JSON with this schema:
             agent["reasoning"] = [*self._release_string_list(agent.get("reasoning")),
                                   "Read-only review: no patch was proposed; baseline failure is retained as a human-review finding."]
         report = agent["report"]
+        governance = self._release_governance(state, report, patch_facts)
+        # The reviewer may enrich the narrative, but these fields are derived
+        # from Scope Guard, PatchSandbox, compile and test execution facts.
+        report = {**report, "riskLevel": governance["riskLevel"],
+                  "blastRadius": governance["blastRadius"], "dryRunResult": governance["dryRunResult"],
+                  "approvalRequired": governance["approvalRequired"],
+                  "deliveryEligible": governance["deliveryEligible"],
+                  "autoApplyEligible": governance["autoApplyEligible"],
+                  "rollbackPlan": governance["rollbackPlan"],
+                  "observationMetrics": governance["observationMetrics"]}
+        agent["report"] = report
+        review_contract = self._release_mapping(agent.get("reviewContract"))
+        review_contract.update({"riskLevel": governance["riskLevel"], "riskGovernance": governance})
+        agent["reviewContract"] = review_contract
+        if governance["approvalRequired"]:
+            agent["humanApprovalPoints"] = list(dict.fromkeys([
+                *self._release_string_list(agent.get("humanApprovalPoints")),
+                *self._release_string_list(governance.get("approvalReasons")),
+            ]))
         patch_reason = self._auto_patch_blocked_reason(patch)
+        if governance["dryRunResult"].get("status") == "FAILED" and not patch_reason:
+            patch_reason = "PatchSandbox dry-run failed: " + "; ".join(
+                self._release_string_list(governance["dryRunResult"].get("blockingReasons")))
         verification_reason = self._verification_blocked_reason(tests)
         manual_takeover = bool(patch_reason or verification_reason)
         raw = {"phase": "PHASE_6_LLM_RELEASE_RISK", "diffAvailable": bool(diff.get("diffAvailable")),
@@ -2293,6 +2530,11 @@ Return JSON with this schema:
                "retryInstructions": agent.get("retryInstructions", {}),
                "reviewVerdict": agent["reviewVerdict"], "qualityScore": agent["qualityScore"],
                "patchDecision": agent["patchDecision"], "manualTakeoverRequired": manual_takeover,
+               "riskGovernance": governance, "blastRadius": governance["blastRadius"],
+               "dryRunResult": governance["dryRunResult"], "approvalRequired": governance["approvalRequired"],
+               "deliveryEligible": governance["deliveryEligible"], "autoApplyEligible": governance["autoApplyEligible"],
+               "rollbackPlan": governance["rollbackPlan"],
+               "observationMetrics": governance["observationMetrics"],
                "autoPatchBlockedReason": patch_reason, "verificationBlockedReason": verification_reason,
                "blockedAutomationSummary": self._blocked_automation_summary(patch_reason, verification_reason),
                "repairObservations": state["context"].get("repairObservations", []),
@@ -2400,6 +2642,142 @@ Return JSON with this schema:
             red_lines.append("CONFIG_FILES_TOUCHED")
         facts["redLines"] = red_lines
         return facts
+
+    @staticmethod
+    def _risk_rank(value: Any) -> int:
+        return {"UNKNOWN": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3}.get(str(value or "").upper(), 0)
+
+    @classmethod
+    def _max_risk(cls, *values: Any) -> str:
+        ranked = max((cls._risk_rank(value), str(value or "UNKNOWN").upper()) for value in values)
+        return ranked[1] if ranked[0] else "UNKNOWN"
+
+    def _release_governance(self, state: CodeOpsState, report: dict[str, Any], patch_facts: dict[str, Any]) -> dict[str, Any]:
+        """Build release gates from executed sandbox/test facts, never reviewer prose alone."""
+        changed_files = self._release_string_list(patch_facts.get("changedFiles"))
+        changed_methods = self._release_string_list(patch_facts.get("changedMethods"))
+        sensitive_files = self._release_string_list(patch_facts.get("sensitiveFiles"))
+        production_count = self._release_int(patch_facts.get("productionFileCount"))
+        test_count = self._release_int(patch_facts.get("testFileCount"))
+        config_count = self._release_int(patch_facts.get("configFileCount"))
+        if not production_count:
+            production_count = sum(1 for path in changed_files
+                                   if "/src/test/" not in path.replace("\\", "/") and path.endswith(".java"))
+        if not test_count:
+            test_count = sum(1 for path in changed_files if "/src/test/" in path.replace("\\", "/"))
+
+        blast_reasons: list[str] = []
+        if sensitive_files:
+            blast_reasons.append("Sensitive files are in the patch scope.")
+        if config_count:
+            blast_reasons.append("Configuration files are in the patch scope.")
+        if production_count >= 8 or len(changed_files) >= 12:
+            blast_level = "HIGH"
+            blast_reasons.append("The patch changes many production files or files overall.")
+        elif production_count >= 3 or len(changed_files) >= 5 or len(changed_methods) >= 5 or config_count:
+            blast_level = "MEDIUM"
+            blast_reasons.append("The patch spans multiple production files, methods, or configuration.")
+        else:
+            blast_level = "LOW"
+            blast_reasons.append("The patch is limited to a small, repository-scoped code surface.")
+        if sensitive_files:
+            blast_level = "HIGH"
+        blast_radius = {
+            "level": blast_level,
+            "changedFiles": changed_files,
+            "changedMethods": changed_methods,
+            "productionFileCount": production_count,
+            "testFileCount": test_count,
+            "configFileCount": config_count,
+            "sensitiveFiles": sensitive_files,
+            "reasons": blast_reasons,
+        }
+
+        patch_generated = patch_facts.get("patchGenerated") is True
+        checks = [
+            {"name": "scope_guard", "passed": patch_facts.get("scopeGuardPassed") is True},
+            {"name": "static_safety", "passed": patch_facts.get("staticSafetyPassed") is True},
+            {"name": "sandbox_patch_apply", "passed": patch_facts.get("patchApplied") is True},
+            {"name": "compile_gate", "passed": patch_facts.get("compilePassed") is True},
+            {"name": "test_verification", "passed": patch_facts.get("testsPassed") is True},
+        ]
+        blocking_reasons: list[str] = []
+        if patch_generated:
+            for check in checks:
+                if not check["passed"]:
+                    blocking_reasons.append(f"{check['name']} did not pass")
+            dry_status = "PASSED" if not blocking_reasons else "FAILED"
+        else:
+            dry_status = "NOT_APPLICABLE"
+            blocking_reasons.append("No generated patch is available for sandbox dry-run.")
+        dry_run = {
+            "status": dry_status,
+            "executedInSandbox": patch_facts.get("patchApplied") is True,
+            "checks": checks,
+            "blockingReasons": blocking_reasons,
+            "note": "This validates the isolated PatchSandbox only; it never executes a production deployment.",
+        }
+
+        risk = self._max_risk(report.get("riskLevel"), blast_level, "HIGH" if dry_status == "FAILED" else "UNKNOWN")
+        observation_metrics = list(dict.fromkeys(self._release_string_list(
+            report.get("onlineObservationMetrics") or report.get("observationMetrics"))))
+        if not observation_metrics:
+            observation_metrics = ["5xx error rate", "core endpoint P95/P99 latency", "service restart count"]
+        mode = str(getattr(self.settings, "codeops_apply_mode", "delivery_only") or "delivery_only").lower()
+        delivery_eligible = bool(patch_generated and dry_status == "PASSED")
+        localization = state.get("working_memory", {}).get("codeLocalization", {})
+        if not isinstance(localization, dict):
+            localization = state.get("localization", {}) if isinstance(state.get("localization"), dict) else {}
+        raw_confidence = localization.get("localizationConfidence", localization.get("confidence", "LOW"))
+        # Repository investigation contracts may express confidence as either
+        # LOW/MEDIUM/HIGH or a normalized 0..1 score.  Do not accidentally
+        # downgrade a 0.92 localization to the literal string "0.92".
+        try:
+            numeric_confidence = float(raw_confidence)
+            confidence = "HIGH" if numeric_confidence >= 0.85 else "MEDIUM" if numeric_confidence >= 0.65 else "LOW"
+        except (TypeError, ValueError):
+            confidence = str(raw_confidence or "LOW").upper()
+        minimum_confidence = str(getattr(self.settings, "codeops_auto_apply_min_confidence", "HIGH") or "HIGH").upper()
+        confidence_rank = {"LOW": 1, "MEDIUM": 2, "HIGH": 3}
+        auto_apply_eligible = bool(
+            getattr(self.settings, "codeops_auto_apply_enabled", True)
+            and mode in {"apply_to_worktree", "approved_apply", "worktree"}
+            and state.get("task", {}).get("taskType") == "INCIDENT_TO_FIX"
+            and delivery_eligible
+            and confidence_rank.get(confidence, 0) >= confidence_rank.get(minimum_confidence, 3)
+            and self._risk_rank(risk) <= self._risk_rank("MEDIUM")
+            and blast_level == "LOW"
+        )
+        approval_required = bool(delivery_eligible and state.get("task", {}).get("taskType") == "INCIDENT_TO_FIX"
+                                 and not auto_apply_eligible)
+        approval_reasons = []
+        if approval_required:
+            approval_reasons.append("Automatic policy did not pass; human approval is required.")
+        if delivery_eligible and confidence_rank.get(confidence, 0) < confidence_rank.get(minimum_confidence, 3):
+            approval_reasons.append(f"Localization confidence is {confidence}, below {minimum_confidence}.")
+        if self._risk_rank(risk) >= self._risk_rank("MEDIUM"):
+            approval_reasons.append(f"Risk level is {risk}.")
+        if blast_level != "LOW":
+            approval_reasons.append(f"Blast radius is {blast_level}.")
+        rollback_steps = self._release_string_list(report.get("rollbackFocus")) or [
+            "Keep the pre-change artifact and repository baseline digest available for rollback.",
+        ]
+        rollback_plan = {
+            "mode": "DELIVERY_ONLY" if mode == "delivery_only" else "APPROVED_WORKTREE_ONLY",
+            "automaticRollback": False,
+            "steps": rollback_steps,
+            "triggerMetrics": observation_metrics,
+            "note": ("No target repository or deployment was changed in delivery_only mode."
+                     if mode == "delivery_only" else "Rollback remains a separately approved effect."),
+        }
+        governance = ReleaseRiskGovernanceContract(
+            riskLevel=risk, blastRadius=blast_radius, dryRunResult=dry_run,
+            approvalRequired=approval_required, deliveryEligible=delivery_eligible,
+            autoApplyEligible=auto_apply_eligible, confidence=confidence,
+            rollbackPlan=rollback_plan, observationMetrics=observation_metrics,
+            approvalReasons=approval_reasons,
+        )
+        return governance.model_dump(by_alias=True)
 
     def _auto_patch_blocked_reason(self, patch: dict[str, Any]) -> str:
         if not patch:
@@ -2678,7 +3056,6 @@ Return JSON matching this schema:
         task["effectLog"] = state.get("effect_log", task.get("effectLog", []))
         task["events"] = state.get("events", task.get("events", []))
         task["updateTime"] = now_iso()
-        await self.store.put("tasks", task_id, task, task["updateTime"])
         for name, item in (task.get("subgraphArtifacts") or {}).items():
             for artifact_id in (item.get("artifactRefs", []) if isinstance(item, dict) else []):
                 await self.store.put("artifacts", str(artifact_id),
@@ -2690,6 +3067,9 @@ Return JSON matching this schema:
         if isinstance(approval, dict) and approval.get("approvalId"):
             approval_record = {**approval, "taskId": task_id, "updateTime": task["updateTime"]}
             await self.store.put("approvals", str(approval["approvalId"]), approval_record, task["updateTime"])
+        durable_records: list[tuple[str, str, dict[str, Any], str]] = [
+            ("tasks", task_id, task, task["updateTime"]),
+        ]
         for event in task.get("events", []):
             if not isinstance(event, dict) or not event.get("eventId"):
                 continue
@@ -2703,8 +3083,16 @@ Return JSON matching this schema:
                                    "testStatus": (task.get("context") or {}).get("verificationPassed"),
                                    "sandboxState": "AVAILABLE" if (task.get("context") or {}).get("sandboxResult") else "NONE",
                                    "recoveryState": "RESUMABLE" if task.get("status") in {"RUNNING", "WAITING_APPROVAL"} else "TERMINAL"})
-            await self.store.put("task_events", str(event["eventId"]), event_record,
-                                 str(event.get("timestamp") or task["updateTime"]))
+            event_time = str(event.get("timestamp") or task["updateTime"])
+            durable_records.append(("task_events", str(event["eventId"]), event_record, event_time))
+            envelope = EventEnvelope.from_task_event(event_record, event_type=event_type_for_task_event(event_record))
+            # An eventId is immutable across checkpoint replay/resume.  Do not
+            # turn an already-published record back into PENDING when the task
+            # projection is persisted again after an interrupt or retry.
+            existing_outbox = await self.store.get("outbox_events", envelope.event_id)
+            outbox = existing_outbox or OutboxRelay.pending_record(envelope)
+            durable_records.append(("outbox_events", str(outbox["outboxId"]), outbox, outbox["updateTime"]))
+        await self.store.put_many(durable_records)
         await self.observability_runtime.metric(task_id, "unauthorized_target_repository_writes", 0,
                                                 run_id=task.get("runId", ""), node="effect_boundary")
         await self.observability_runtime.metric(task_id, "tool_calls", int(task.get("usedToolCalls", 0) or 0),

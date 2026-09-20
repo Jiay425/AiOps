@@ -8,423 +8,311 @@
 
 # Ops AutoAgent Diagnosis
 
-### A LangGraph agent that turns alerts into tested, reviewable fixes
+### A LangGraph agent that turns alerts into verified code fixes
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#quick-start)
-[![LangGraph](https://img.shields.io/badge/LangGraph-1.2.9-1C3C3C?logo=langchain&logoColor=white)](#langgraph-runtime)
-[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](#api-surface)
-[![Checkpoints](https://img.shields.io/badge/Execution-SQLite%20%7C%20PostgreSQL-336791?logo=postgresql&logoColor=white)](#durable-execution)
-[![Eval](https://img.shields.io/badge/Evaluation-52%2B%20business%20cases-6E40C9)](#evaluation)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![LangGraph](https://img.shields.io/badge/LangGraph-StateGraph-1C3C3C?logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](src/ops_autoagent/api.py)
+[![Eval](https://img.shields.io/badge/Eval-52%20Business%20%2B%2016%20Runtime-6E40C9)](docs/eval-report.md)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Start with an alert. Diagnose the fault, find the code, generate a patch, run tests, and wait for approval.**
+**Start with an alert. Gather evidence, find the code, generate a patch, compile and test it, review it independently, then auto-apply it to a managed worktree only when every gate passes.**
 
 </div>
 
 ---
 
-## How does it work?
+## What it does
 
-When an alert fires, the agent reads metrics, logs, traces, and runbook context,
-then asks an LLM to identify the most likely cause. It searches the repository
-for the relevant files and methods, creates a patch inside a managed sandbox,
-runs compilation and tests, and sends the result to an independent review agent.
-The target repository is only changed after a human approves it.
+An order-duplication alert should not end with an LLM saying “this may be an idempotency issue.” This project carries the incident through a verifiable repair loop:
 
-This is the Python + LangGraph migration of the original Spring AI/Spring Boot
-runtime. LangGraph keeps the state for every step, controls the agent loops,
-pauses for approval, and resumes the same task after an interruption:
+```text
+Alert
+  → metrics / logs / traces / runbooks
+  → anomaly detection + graph-correlated RCA
+  → code localization
+  → patch generation in PatchSandbox
+  → Maven compilation and tests
+  → independent risk review
+  → automatic apply / human confirmation for uncertain cases
+```
+
+The model can propose diagnoses and patches; it cannot write a repository directly. `apply_approved_patch`, guarded by policy, digests, and an audit record, is the only mutation boundary.
+
+## Three agents, clear responsibilities
+
+| Agent | Input and output | Side-effect boundary |
+| --- | --- | --- |
+| **Diagnosis Agent** | Turns metrics, logs, traces, runbooks, anomaly signals, and Neo4j candidates into a diagnosis and localization constraints. | Read-only |
+| **Repair Agent** | Searches code and tests, then proposes the smallest patch and verification plan in PatchSandbox. | PatchSandbox only |
+| **Review Agent** | Produces a structured release decision from actual Scope Guard, compilation, test, dry-run, and risk facts. | Read-only |
+
+`CodeOpsGraph` is the parent graph. It owns ordering, retries, checkpoints, SSE events, and write authority. Domain subgraphs handle evidence, graph RCA, repository investigation, repair, verification, and independent review; none owns global write permission.
+
+```mermaid
+flowchart LR
+    A[Alert / Issue] --> B[FastAPI / Kafka]
+    B --> C[CodeOpsGraph]
+    C --> D[Diagnosis Agent]
+    D --> E[OpsEvidenceSubgraph]
+    E --> F[3-Sigma · EWMA · Rules · Isolation Forest]
+    D --> G[GraphRcaSubgraph]
+    G --> H[Neo4j topology · change · trace]
+    C --> I[Repair Agent]
+    I --> J[Repository investigation]
+    J --> K[PatchSandbox]
+    K --> L[Maven compile / test]
+    L --> M[Review Agent]
+    M -->|high confidence + gates passed| N[auto_approve_patch]
+    M -->|low confidence / high risk| O[interrupt / resume]
+    N --> P[apply_approved_patch]
+    O --> P
+    C -. checkpoint .-> Q[(SQLite / PostgreSQL)]
+    C -. event / artifact / metric .-> R[(MySQL / Kafka)]
+```
+
+## A real end-to-end case
+
+**Incident: duplicate writes caused by concurrent order retries.** Observability input is a sanitized `TEST_SIMULATED_DATA` fixture. Model invocation, repository mutation, Maven verification, and managed-worktree application are real executions; fixture telemetry is never presented as production telemetry.
+
+| Stage | Observed result |
+| --- | --- |
+| Model | DeepSeek Flash via an OpenAI-compatible API |
+| Localization | A check-then-mark race in `OrderSubmitService` |
+| Patch | Added synchronized atomic `markProcessedIfAbsent`; callers use one operation |
+| Changed files | `IdempotencyService.java`, `OrderSubmitService.java` |
+| Verification | Scope Guard, static safety, Maven compilation, and `IdempotencyServiceAtomicityTest` passed |
+| Review and execution | `ACCEPT_WITH_HUMAN_REVIEW`; policy auto-applied because confidence was high and every gate passed |
+| Audit | 17 tool calls in about 313 seconds; Patch Digest, before/after checksums, and Effect Log persisted |
+
+Read the full trace in the [order idempotency case study](docs/incident-case-study.md).
+
+## Get running in five minutes
+
+### Offline demo: no API key or infrastructure
+
+```powershell
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -e ".[dev]"
+.venv/Scripts/python.exe -m ops_autoagent.demo
+```
+
+The offline demo replaces only model output with a deterministic adapter. It still runs the real graph, subgraphs, PatchSandbox, Scope Guard, Maven verification, review, and checkpoints. It delivers an artifact only and never changes a target repository.
+
+### Full stack: real model + Kafka + Neo4j + MySQL
+
+```powershell
+Copy-Item deploy/.env.full.example deploy/.env.full.local
+# Fill local infrastructure passwords in the untracked file. Never commit an API key.
+docker compose --env-file deploy/.env.full.local -f deploy/docker-compose.full.yml up -d --build
+
+$env:OPENAI_BASE_URL = "https://api.deepseek.com"
+$env:OPENAI_MODEL = "deepseek-flash"
+$env:OPENAI_API_KEY = "<your-api-key>"
+Invoke-RestMethod -Method Post http://127.0.0.1:8099/api/v1/codeops/evaluation/run/incident-order-idempotency-race
+```
+
+See the [demo guide](docs/demo.md) for expected output and boundaries.
+
+## Why it is more than an LLM wrapper
+
+| Capability | Implementation | Value |
+| --- | --- | --- |
+| Explainable anomaly detection | 3-Sigma, EWMA, rules, and Isolation Forest emit structured signals before LLM diagnosis. | Reduces false conclusions from normal variation. |
+| Graph-correlated RCA | Neo4j queries dependencies, recent changes, and trace paths. | Candidates carry topology and change evidence. |
+| Durable orchestration | LangGraph `StateGraph`, conditional routes, subgraphs, SQLite/PostgreSQL checkpoints. | Work can be interrupted, resumed, and replayed. |
+| Reliable event path | Versioned events, transactional Outbox, idempotent Kafka consumers, and a DLQ. | Messaging does not replace task state. |
+| Controlled repair | PatchSandbox, Scope Guard, Patch/Baseline Digests, one Effect Boundary. | Prevents out-of-scope changes and repository drift. |
+| Risk routing | High-confidence, low-risk repairs may apply to a managed worktree; others use `interrupt/resume`. | Automation retains a control plane. |
+| Replayable evaluation | 52 business E2E cases and 16 runtime safety/reliability cases with Trace/SSE replay. | Failures remain attributable to a stage. |
+
+## Runtime architecture: clear ownership
 
 ~~~text
-Incident / code task
+Alert / Webhook / Issue
         │
-        ▼
-Evidence bundle ──► structured diagnosis ──► repository investigation
-        │                                      │
-        │                                      ▼
-        └──────────────────────────────► patch proposal
-                                               │
-                                               ▼
-                                      compile / test verification
-                                               │
-                                               ▼
-                                      independent code review
-                                               │
-                               human approval / delivery-only output
+        ├── FastAPI: synchronous submission, SSE replay, approval, evaluation
+        └── Kafka: asynchronous ingress, buffering, retry, DLQ
+                         │
+                         ▼
+                   CodeOpsGraph (per-task control plane)
+                         │
+       ┌─────────────────┼──────────────────┐
+       ▼                 ▼                  ▼
+  LangGraph Checkpoint  MySQL projections   Neo4j / Runbooks
+  node and recovery     Task/Event/Outbox   topology, change, dependencies
+                         │
+                         ▼
+              PatchSandbox → verification → one write boundary
 ~~~
 
-In short, this is an agent that turns an alert into an automated fix, while
-keeping every step inspectable, replayable, and bounded. The model can propose
-a change, but it cannot directly modify production code.
+Kafka does not replace LangGraph. Kafka moves external events reliably; CodeOpsGraph owns
+state, conditional routes, retries, pauses, and recovery inside an Incident-to-Fix task.
 
-## Highlights
-
-| | Capability | What it means |
-| --- | --- | --- |
-| 🧭 | Evidence before conclusions | Collect metrics, logs, traces, and runbooks before generating a diagnosis. |
-| 🔎 | Automatic code localization | Read-only repository tools search code, call paths, and related tests. |
-| 🛠️ | Automatic patch generation | A patch is created and validated in a managed sandbox, never written directly to the target repository. |
-| 🧪 | Compile and test | The change is verified before the review agent sees it. |
-| ⏸️ | Human approval | <code>interrupt()</code> pauses the workflow; the same <code>thread_id</code> resumes it after approval. |
-| 🔐 | Safe write boundary | Only <code>apply_approved_patch</code> can actually modify the target repository. |
-| 📊 | Replayable evaluation | 52 business E2E cases, 10 safety/reliability cases, and complete event/runtime metrics. |
-
-## Architecture
-
-The project has two top-level graph entry points. <code>CodeOpsGraph</code> takes an incident
-from diagnosis to code repair. <code>OpsDiagnosisGraph</code> is the standalone operations
-diagnosis entry point: it collects online evidence, writes a diagnosis report, and
-streams SSE events. They can share evidence results, but the observability tools
-never directly modify the repository.
-
-~~~mermaid
-flowchart LR
-    U[Alert / Issue / API request] --> F[FastAPI]
-    F --> C[CodeOpsGraph]
-
-    C --> P[plan]
-    P --> O[orchestrate]
-    O --> D[Diagnosis stage]
-    D --> E[OpsEvidenceSubgraph]
-    E --> X[Metrics / Logs / Traces / Runbooks]
-    D --> I[RepositoryInvestigationSubgraph]
-    I --> R[Repair stage]
-    R --> S[RepairProposalSubgraph]
-    S --> V[VerificationSubgraph]
-    V --> Q[IndependentReviewSubgraph]
-
-    Q -->|ACCEPT / HUMAN_REVIEW| H[interrupt: human approval]
-    Q -->|RETRY_REPAIR| R
-    Q -->|REJECT / NO_CODE_FIX| Z[summarize]
-    H -->|approve delivery| L[deliver_patch]
-    H -->|approve apply| A[apply_approved_patch]
-    H -->|reject| N[rejected]
-    L --> Z
-    A --> Z
-    N --> Z
-
-    C -. durable state .-> K[(LangGraph checkpointer)]
-    C -. events / artifacts / metrics .-> M[(Store)]
-    A -. only production write .-> T[Target repository]
-
-    OD[OpsDiagnosisGraph] --> OE[fixed observability collection]
-    OE --> OR[evidence review / report]
-    OR --> OS[SSE stream]
-~~~
-
-### The three agent responsibilities
-
-The graph separates business responsibilities even when the implementation
-routes them through multiple specialized skill nodes:
-
-| Role | Input | Output | Effect boundary |
-| --- | --- | --- | --- |
-| **Diagnosis agent** | Incident context and fixed operational sources | Evidence bundle, root-cause candidates, confidence, missing-evidence and remediation constraints | Read-only |
-| **Repair agent** | Diagnosis contract and repository context | Localized files/methods, patch proposal, patch digest, verification plan | Managed patch sandbox only |
-| **Review agent** | Patch facts, scope guard, compile/test result, risk context | Structured release verdict and retry / approval constraints | Read-only |
-
-The parent graph owns sequencing, budgets, approval, retry policy, and side
-effects. The agents do not bypass those policies by calling tools directly.
-
-## Graph topology
-
-### <code>CodeOpsGraph</code> — automated repair workflow
+### Parent graph and domain subgraphs
 
 ~~~text
 START
-  → plan
-  → orchestrate
+  → plan → orchestrate
       ├─ ops_diagnosis
+      │    ├─ OpsEvidenceSubgraph
+      │    └─ GraphRcaSubgraph
       ├─ agent_loop_investigation
-      ├─ repo_understanding
-      ├─ engineering_knowledge_rag
-      ├─ bug_fix
-      ├─ test_verification
-      ├─ release_risk_analysis
-      └─ pr_review
+      ├─ repo_understanding / engineering_knowledge_rag
+      ├─ RepairProposalSubgraph
+      ├─ VerificationSubgraph
+      └─ IndependentReviewSubgraph
   → finish
-      ├─ retry_repair → repair_feedback → bug_fix
-      ├─ approval → prepare_approval → human_approval
-      │                         ├─ deliver_patch
-      │                         ├─ apply_approved_patch
-      │                         └─ rejected
+      ├─ retry_repair → repair_feedback → RepairProposalSubgraph
+      ├─ auto_approve_patch → apply_approved_patch
+      ├─ human_approval → interrupt / resume
       └─ summarize → END
 ~~~
 
-The orchestrator chooses the next skill from task type, working memory,
-completed skills, focus areas, and remaining budgets. Every route returns to
-the parent graph, so the parent remains the source of truth for task status,
-attempt count, and effects.
-
-### Reusable subgraphs
-
-Each subgraph is a compiled <code>StateGraph</code> with its own small state
-contract. The parent invokes it with a task-scoped <code>thread_id</code>, then
-attaches only the validated output and artifact references to the parent state.
-
-| Subgraph | Internal shape | Responsibility |
+| Subgraph | Internal flow | Artifact | Can write? |
 | --- | --- | --- |
-| <code>OpsEvidenceSubgraph</code> | <code>prepare_input → collect_and_review_evidence → publish_contract</code> | Normalize operational evidence and evidence sufficiency without writing code. |
-| <code>RepositoryInvestigationSubgraph</code> | <code>prepare_input → readonly_investigation → publish_contract</code> | Read-only repository search, snapshots, file snippets, diffs, history, tests, and engineering knowledge. |
-| <code>RepairProposalSubgraph</code> | <code>prepare_input → sandbox_repair_proposal → publish_contract</code> | Produce and validate a patch proposal inside the managed patch sandbox. |
-| <code>VerificationSubgraph</code> | <code>prepare_input → run_verification → publish_contract</code> | Normalize compile/test/background-task facts into a verification contract. |
-| <code>IndependentReviewSubgraph</code> | <code>prepare_input → review_patch_facts → publish_contract</code> | Validate an independent release-review contract and downgrade unsafe release claims. |
+| OpsEvidenceSubgraph | prepare → collect → publish | evidence bundle, negative evidence, anomaly signals | No |
+| GraphRcaSubgraph | prepare → correlate → publish | paths, change correlation, RCA candidates | No |
+| RepositoryInvestigationSubgraph | prepare → readonly investigation → publish | code excerpts, call paths, tests, constraints | No |
+| RepairProposalSubgraph | prepare → sandbox proposal → publish | Patch Proposal, Digest, verification plan | Sandbox only |
+| VerificationSubgraph | prepare → run verification → publish | compile, tests, timeout, bounded logs | No |
+| IndependentReviewSubgraph | prepare → review facts → publish | release decision, risk, retry constraints | No |
 
-This decomposition makes the workflow inspectable: a checkpoint can show both
-the parent node and the domain artifact produced by the child graph.
+### LangGraph capabilities in this project
 
-## LangGraph runtime
-
-This project uses LangGraph as a durable state machine, not only as a prompt
-router.
-
-| LangGraph capability | Where it appears | Why it matters |
-| --- | --- | --- |
-| Typed graph state | <code>CodeOpsState</code>, <code>OpsState</code>, <code>SubgraphState</code> | Nodes exchange structured state instead of opaque chat messages. |
-| Conditional edges | <code>orchestrate</code>, <code>finish</code>, <code>human_approval</code>, <code>apply_approved_patch</code> | Routing decisions are explicit and testable. |
-| Reducers | <code>events</code>, <code>tool_trace</code>, <code>effect_log</code> use additive list reducers | Parallel branches and repeated attempts append history instead of overwriting it. |
-| Fan-out / fan-in | Parallel metrics, logs, and traces collection plus an evidence barrier | Independent evidence sources can run concurrently and join deterministically. |
-| Nested subgraphs | Five CodeOps domain subgraphs | Domain contracts stay small while the parent retains global policy control. |
-| Checkpointing | Memory, SQLite, or PostgreSQL saver | A task can be inspected, resumed, and reconciled across process boundaries. |
-| Interrupt / resume | <code>interrupt()</code> and <code>Command(resume=...)</code> | Human approval pauses the graph without losing the execution state. |
-| Streaming | <code>astream(..., stream_mode="updates")</code> and FastAPI SSE | Clients receive node events and can replay a task timeline. |
-| Bounded feedback loops | Repair feedback, round limits, tool budgets, and retry budgets | Agent autonomy is constrained by deterministic limits. |
-
-### Durable execution
-
-Every CodeOps task uses its task ID as the LangGraph <code>thread_id</code>. The
-checkpointer stores the state needed to inspect the current node, pending
-interrupt, approval identity, patch digest, and retry context:
-
-~~~json
-{
-  "threadId": "task-id",
-  "currentNode": ["human_approval"],
-  "status": "WAITING_APPROVAL",
-  "approvalId": "approval-id",
-  "interruptPending": true
-}
-~~~
-
-Supported backends are selected through configuration:
-
-~~~text
-memory      local process tests and short-lived development runs
-sqlite      default durable local deployment
-postgres    multi-process / service deployment
-~~~
-
-Terminal in-memory checkpoints are pruned; resumable approval checkpoints are
-retained. This keeps local development predictable without changing the
-durable backend contract.
-
-## Data and safety boundary
-
-The model proposes intent. The runtime validates and materializes effects.
-
-~~~text
-LLM intent
-  → typed diagnosis / investigation / patch / review contract
-  → scope guard + patch validation
-  → managed patch sandbox
-  → compile and test verification
-  → independent review
-  → human approval interrupt
-  → delivery artifact or apply_approved_patch
-  → target repository
-~~~
-
-- The model never receives a direct production-repository write tool.
-- Patch generation is isolated behind <code>RepairProposalSubgraph</code> and
-  <code>PatchSandbox</code>.
-- <code>apply_approved_patch</code> is the only production mutation boundary.
-- <code>CODEOPS_APPLY_MODE=delivery_only</code> remains the conservative default.
-- Scope Guard, patch validation, baseline digests, and patch digests prevent
-  an approval from silently drifting to another repository state.
-- Reviewer output is structured and checked against deterministic patch/test
-  facts; unsafe <code>RELEASE_READY</code> claims are downgraded to human review.
-- Trace, SSE, event, and evaluation projections are redacted and bounded.
-- Secrets belong in an untracked local <code>.env</code>, never in source,
-  fixtures, or committed evaluation output.
-
-## Evidence layer
-
-~~~text
-Prometheus metrics ─┐
-ELK log evidence   ─┼──► evidence signals ───► diagnosis contract
-SkyWalking traces  ─┤
-Runbook retrieval  ─┘
-~~~
-
-Evidence is represented with provenance, availability, negative evidence, and
-review constraints. A source that was successfully queried but returned no
-anomaly is preserved as negative evidence; it is not silently treated as a
-missing source.
-
-The CodeOps parent consumes the resulting contract as input to repository
-investigation. The standalone Ops graph additionally supports serial or
-parallel collection, an evidence barrier, review-driven supplementation, and
-SSE event streaming for incident diagnosis.
-
-## Evaluation
-
-The repository contains a catalog and execution harness rather than a
-single hand-picked demo:
-
-| Suite | Coverage | Status |
-| --- | --- | --- |
-| Business E2E | 52 cases: 16 legacy baseline + 36 expansion cases | Catalogued as <code>E2E_BUSINESS</code> |
-| Runtime safety / reliability | 10 cases | Reported separately from business outcomes |
-| Fixture provenance | Incident telemetry and sample repositories | Explicit fixture references and reuse metadata |
-
-The business cases cover distributed consistency, database and infrastructure
-failures, configuration, code-quality and issue-to-patch tasks, release risk,
-scope governance, verification, and reviewer feedback.
-
-Evaluation reports keep these dimensions distinct:
-
-~~~text
-evidence quality
-root-cause / localization quality
-patch proposal quality
-verification result
-review verdict
-repair attempts and budgets
-checkpoint / SSE replay behavior
-scope-guard and unauthorized-write safety
-~~~
-
-Fixture-backed runs are labeled as such. If a real LLM or external service is
-unavailable, the harness reports the unavailable stage instead of fabricating
-review, Maven, or production-observability success.
-
-## API surface
-
-The FastAPI application exposes the graph as ordinary HTTP and SSE contracts:
-
-| Surface | Endpoint |
+| Capability | Role |
 | --- | --- |
-| Service health | <code>GET /actuator/health</code> |
-| OpenAPI | <code>GET /docs</code> |
-| Ops diagnosis stream | <code>POST /api/v1/ops/incident/analyze</code> |
-| CodeOps task submission | <code>POST /api/v1/codeops/task/submit</code> |
-| CodeOps task stream / replay | <code>GET /api/v1/codeops/task/{task_id}/events</code> |
-| Approval status | <code>GET /api/v1/codeops/evaluation/approval/{task_id}</code> |
-| Evaluation catalog | <code>GET /api/v1/codeops/evaluation/cases</code> |
-| Evaluation summary | <code>GET /api/v1/codeops/evaluation/summary</code> |
-| Runtime safety cases | <code>GET /api/v1/codeops/evaluation/runtime/cases</code> |
-| Prometheus metrics | <code>GET /actuator/prometheus</code> |
+| Typed State | CodeOpsState, OpsState, and Pydantic contracts exchange structured facts rather than opaque prompt text. |
+| Conditional Edge | orchestrate, finish, approval, and apply routes make the next action a testable policy. |
+| Reducer | Append reducers preserve events, tool traces, and effect logs across retries and parallel work. |
+| Fan-out / Fan-in | Metrics, Logs, and Traces are collected concurrently and converge at an Evidence Barrier. |
+| Checkpoint | Memory, SQLite, PostgreSQL retain node, resume state, patch digest, and retry context. |
+| Streaming | astream updates and FastAPI SSE emit nodes, subgraphs, tests, and effects. |
+| Bounded loop | Repair feedback plus attempt/tool/retry budgets allow improvement without infinite loops. |
 
-The SSE projection contains bounded event summaries, artifact references,
-subgraph/node identity, attempt number, and replay metadata—not full prompts,
-secrets, or unrestricted tool responses.
+## Production control plane
 
-## Repository layout
+### Anomaly detection before the LLM
 
-~~~text
-ops-autoagent-diagnosis-python/
-├── src/ops_autoagent/
-│   ├── graphs/
-│   │   ├── codeops.py       # CodeOps parent graph and routing policy
-│   │   ├── ops.py           # standalone incident diagnosis graph
-│   │   ├── subgraphs.py     # domain subgraphs and contracts
-│   │   └── state_models.py  # reducers, digests, durable state helpers
-│   ├── codeops/             # tools, repair services, evaluator, policies
-│   ├── ops/                 # observability, runbook, and incident services
-│   ├── api.py               # FastAPI, SSE, approval, and evaluation routes
-│   ├── persistence.py       # LangGraph checkpointer selection
-│   ├── schemas.py            # Pydantic contracts
-│   └── config.py             # environment-backed settings
-├── tests/                    # graph, API, safety, and regression tests
-├── fixtures/incident/        # redacted incident and evaluation fixtures
-├── samples/                  # sample repositories and verification assets
-├── docs/                     # migration, architecture, and runbook notes
-├── pyproject.toml
-└── .env.example
-~~~
+OpsEvidenceSubgraph turns telemetry into explainable signals before Diagnosis Agent reasoning:
 
-## Quick start
+| Detector | Best for | Output |
+| --- | --- | --- |
+| 3-Sigma | spikes and baseline deviation | z-score, baseline, severity |
+| EWMA | sustained trends and gradual degradation | smoothed trend and direction |
+| Rules | error codes, timeouts, log patterns | explicit evidence and thresholds |
+| Isolation Forest | multivariate anomalies | anomaly score and feature summary |
 
-Requires Python 3.11 or newer.
+A successful query that finds no issue becomes negative evidence. The model cannot turn it into missing data.
 
-~~~powershell
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install -e ".[dev]"
-Copy-Item .env.example .env
-.venv/Scripts/python.exe -m ops_autoagent.main
-~~~
-
-The local server listens on <code>http://127.0.0.1:8099</code> by default:
+### Neo4j graph-correlated RCA
 
 ~~~text
-console      /
-OpenAPI      /docs
-health       /actuator/health
-metrics      /actuator/prometheus
+api-gateway → order-service → payment-service → mysql-primary
+                         └→ inventory-service → redis
 ~~~
 
-Configure local credentials and service addresses only in <code>.env</code>. The default
-development posture is fixture-friendly, checkpointed, and delivery-only.
+Neo4j holds controlled snapshots of services, dependencies, databases, topics, changes, and runbooks.
+GraphRcaSubgraph combines topology, recent changes, traces, and anomaly signals into candidates with
+paths and sources. If graph data is unavailable, it reports NOT_CONFIGURED or UNAVAILABLE.
 
-## Configuration
+### Kafka, Outbox, and DLQ
 
-| Variable | Purpose |
+~~~text
+Alert webhook
+  → MySQL: Alert + Dispatch + Outbox (one transaction)
+  → Kafka: aiops.alerts.v1 / aiops.events.v1
+  → idempotent consumer
+  → CodeOpsGraph
+  → failure → aiops.dlq.v1
+~~~
+
+- An Outbox item becomes PUBLISHED only after a Kafka acknowledgement.
+- Every envelope has a version and idempotencyKey; duplicate delivery does not start duplicate repair.
+- Invalid or exhausted messages retain their envelope and error class in the DLQ.
+
+## Automatic repair policy and safety boundaries
+
+## Safety model
+
+```text
+LLM proposal
+  → Pydantic contract validation
+  → Scope Guard + PatchSandbox
+  → compile / test + independent review
+  → policy decision
+  → apply_approved_patch (the only write boundary)
+```
+
+- `CODEOPS_APPLY_MODE=delivery_only` is the default: it produces a patch artifact only.
+- The full-stack demo can enable `apply_to_worktree`; this is an explicitly allowed worktree, **not production-repository authorization**.
+- Automatic application requires enabled policy, `INCIDENT_TO_FIX`, high confidence, low/medium risk, low blast radius, and passing Scope Guard, sandbox, compile, and test gates.
+- Other cases call `interrupt()` and resume with `Command(resume=...)` on the same `thread_id`.
+- Trace, SSE, events, and evaluation projections are redacted and bounded. Secrets never belong in source, fixtures, logs, or commits.
+
+### Risk routing
+
+| Condition | Outcome |
 | --- | --- |
-| <code>OPENAI_BASE_URL</code> / <code>OPENAI_API_KEY</code> / <code>OPENAI_MODEL</code> | OpenAI-compatible model endpoint and model selection |
-| <code>LANGGRAPH_CHECKPOINT_BACKEND</code> | <code>memory</code>, <code>sqlite</code>, or <code>postgres</code> |
-| <code>LANGGRAPH_CHECKPOINT_PATH</code> | SQLite checkpoint file |
-| <code>LANGGRAPH_CHECKPOINT_POSTGRES_URL</code> | PostgreSQL checkpoint connection |
-| <code>CODEOPS_HITL_APPROVAL_ENABLED</code> | Enable approval interrupt before delivery/apply |
-| <code>CODEOPS_APPLY_MODE</code> | Conservative default: <code>delivery_only</code> |
-| <code>CODEOPS_SUBGRAPHS_ENABLED</code> | Enable domain subgraph contracts |
-| <code>OPS_FIXTURE_FALLBACK</code> | Allow deterministic fixtures for local validation |
-| <code>PROMETHEUS_BASE_URL</code> / <code>ELK_BASE_URL</code> / <code>SKYWALKING_GRAPHQL_URL</code> | External observability sources |
-| <code>OPS_RUNBOOK_PATH</code> / <code>PGVECTOR_URL</code> | Runbook source and optional vector retrieval |
+| High confidence, low/medium risk, low blast radius, and every verification gate passed | Auto-approve and apply to an explicitly allowed managed worktree. |
+| Low confidence, high risk, insufficient tests, Scope Guard rejection, or disabled policy | No target-repository write; deliver the patch or wait through interrupt(). |
+| Patch Digest / Baseline Digest mismatch | Reject application to prevent repository drift. |
+| Out-of-scope or unauthorized path | Scope Guard rejects it and records a security event. |
 
-Never place production credentials, private keys, or bearer tokens in this
-repository. Use an ignored <code>.env</code> file or the deployment secret manager.
+Runbook actions use Kubernetes server-side dry-run. Admission, policy, and schema are evaluated without
+mutating a cluster.
 
-## Verification
+## API, SSE, and observability
 
-Run the repository's verification script:
+| Capability | Endpoint |
+| --- | --- |
+| Health | GET /actuator/health |
+| OpenAPI | GET /docs |
+| Submit a CodeOps task | POST /api/v1/codeops/task/submit |
+| Task events and SSE replay | GET /api/v1/codeops/task/{task_id}/events |
+| Task observability projection | GET /api/v1/codeops/task/{task_id}/observability |
+| Business case catalog | GET /api/v1/codeops/evaluation/cases |
+| Runtime safety cases | GET /api/v1/codeops/evaluation/runtime/cases |
+| Prometheus metrics | GET /actuator/prometheus |
 
-~~~powershell
-powershell -File scripts/verify.ps1 -Python .venv/Scripts/python.exe
-~~~
+SSE includes only bounded summaries, node/subgraph identities, attempt numbers, artifact references, and
+replay metadata. It never includes a full prompt, secret, or unbounded tool response.
 
-For focused checks:
+The MySQL projection retains Tasks, Events, Artifacts, Runtime Metrics, Outbox entries, and Effect Logs.
+Prometheus records subgraph duration, LLM calls, approval wait, SSE replay, Scope Guard rejections,
+repair attempts, and unauthorized write count.
 
-~~~powershell
+## Evaluation and documentation
+
+| Goal | Start here |
+| --- | --- |
+| Run a case | [Demo guide](docs/demo.md) |
+| Follow the idempotency repair | [Case study](docs/incident-case-study.md) |
+| Inspect topology and deployment validation | [Production architecture](docs/production-architecture.md) |
+| Learn the LangGraph migration | [LangGraph migration](docs/langgraph-migration.md) |
+| Read the 52 + 16 case boundaries | [Evaluation notes](docs/eval-report.md) |
+
+```powershell
 .venv/Scripts/python.exe -m pytest -q
 .venv/Scripts/python.exe -m compileall src
 git diff --check
-~~~
+```
 
-The latest migration/evaluation validation recorded in the repository passed
-the Python test suite, compilation check, diff check, and sample Maven
-verification. External LLM, Prometheus, ELK, SkyWalking, and Maven results
-remain environment-dependent and are never inferred from fixture presence.
-
-## Migration note
-
-The project keeps the original Spring AI domain intent—incident evidence,
-runbook context, repository repair, risk review, and verification—while moving
-execution semantics to Python and LangGraph:
+## Project layout
 
 ~~~text
-Spring AI / Spring Boot services
-          ↓ migration
-Python 3.11 + LangGraph + FastAPI
+src/ops_autoagent/
+├── graphs/       # CodeOps parent graph, subgraphs, state, routes, checkpoints
+├── codeops/      # repository tools, PatchSandbox, verification, policy, evaluation
+├── ops/          # Metrics / Logs / Traces / Runbooks and anomaly detection
+├── topology.py   # Neo4j topology queries and graph RCA
+├── eventing.py   # Kafka Event Contract, consumer, DLQ
+├── outbox.py     # MySQL transactional Outbox
+├── api.py        # FastAPI, SSE, approval, evaluation
+└── persistence.py# SQLite / PostgreSQL checkpoint backends
 ~~~
 
-The important change is not the programming language alone. State, routing,
-checkpointing, interrupts, subgraphs, streaming, and effect boundaries are now
-visible in the graph itself, making each run easier to inspect, replay, test,
-and explain.
+Read [production architecture and validation](docs/production-architecture.md) for deployment,
+topology snapshot contracts, and the validation sequence.
 
-## Scope
-
-Ops AutoAgent Diagnosis is an engineering automation and decision-support
-harness. It is not an unattended production deployer, a replacement for SRE
-approval, or a guarantee that every incident has a code fix. When evidence,
-model access, repository context, or verification capability is insufficient,
-the runtime keeps the limitation visible and stops at the appropriate boundary.
+If this helps you, a ⭐ is appreciated.

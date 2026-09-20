@@ -1,0 +1,14 @@
+CREATE CONSTRAINT service_name_unique IF NOT EXISTS FOR (node:Service) REQUIRE node.name IS UNIQUE;
+CREATE CONSTRAINT workload_name_unique IF NOT EXISTS FOR (node:Workload) REQUIRE node.uid IS UNIQUE;
+CREATE CONSTRAINT pod_name_unique IF NOT EXISTS FOR (node:Pod) REQUIRE node.uid IS UNIQUE;
+CREATE CONSTRAINT node_name_unique IF NOT EXISTS FOR (node:Node) REQUIRE node.name IS UNIQUE;
+CREATE CONSTRAINT database_name_unique IF NOT EXISTS FOR (node:Database) REQUIRE node.name IS UNIQUE;
+CREATE CONSTRAINT cache_name_unique IF NOT EXISTS FOR (node:Cache) REQUIRE node.name IS UNIQUE;
+CREATE CONSTRAINT topic_name_unique IF NOT EXISTS FOR (node:Topic) REQUIRE node.name IS UNIQUE;
+CREATE CONSTRAINT repository_name_unique IF NOT EXISTS FOR (node:Repository) REQUIRE node.url IS UNIQUE;
+CREATE CONSTRAINT module_name_unique IF NOT EXISTS FOR (node:Module) REQUIRE node.key IS UNIQUE;
+CREATE CONSTRAINT change_id_unique IF NOT EXISTS FOR (node:Change) REQUIRE node.changeId IS UNIQUE;
+CREATE CONSTRAINT alert_id_unique IF NOT EXISTS FOR (node:Alert) REQUIRE node.alertId IS UNIQUE;
+CREATE CONSTRAINT runbook_id_unique IF NOT EXISTS FOR (node:Runbook) REQUIRE node.runbookId IS UNIQUE;
+CREATE INDEX change_timestamp IF NOT EXISTS FOR (node:Change) ON (node.timestamp);
+CREATE INDEX service_namespace IF NOT EXISTS FOR (node:Service) ON (node.namespace);

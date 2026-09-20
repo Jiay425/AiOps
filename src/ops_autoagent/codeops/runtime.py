@@ -409,7 +409,9 @@ class PatchScopeGuard:
             violations.append("METHOD_OUT_OF_SCOPE: STRICT_SINGLE_METHOD patch changes multiple methods")
         if scope_type in {"STRICT_SINGLE_METHOD", "MULTI_METHOD"} and target_methods:
             for method in changed_methods:
-                if not self._method_in_scope(method, target_methods):
+                allowed_helper = bool(scope.get("allowNewHelperMethods")) and scope_type == "MULTI_METHOD" \
+                    and self._class_in_scope(method, target_methods)
+                if not self._method_in_scope(method, target_methods) and not allowed_helper:
                     violations.append(f"METHOD_OUT_OF_SCOPE: {method} not in {target_methods}")
         failure = "" if not violations else violations[0].split(":", 1)[0]
         return {"passed": not violations, "failureType": failure, "touchedFiles": touched,
@@ -473,14 +475,26 @@ class PatchScopeGuard:
     @staticmethod
     def _method_in_scope(method: str, target_methods: list[str]) -> bool:
         """Compare method identities independent of an optional Java signature."""
-        bare = method.rsplit(".", 1)[-1]
+        normalized = method.replace("#", ".")
+        bare = normalized.rsplit(".", 1)[-1]
         if bare == "<STRUCTURE>":
             return True
-        identity = method.split("(", 1)[0]
+        identity = normalized.split("(", 1)[0]
         for target in target_methods:
-            target_identity = str(target).split("(", 1)[0]
+            target_identity = str(target).replace("#", ".").split("(", 1)[0]
             target_bare = target_identity.rsplit(".", 1)[-1]
             if identity == target_identity or bare == target_bare:
+                return True
+        return False
+
+    @staticmethod
+    def _class_in_scope(method: str, target_methods: list[str]) -> bool:
+        """Allow a narrowly-scoped helper only inside an already-approved class."""
+        parts = method.replace("#", ".").split("(", 1)[0].split(".")
+        class_name = parts[-2] if len(parts) >= 2 else ""
+        for target in target_methods:
+            candidate = str(target).replace("#", ".").split("(", 1)[0].split(".")
+            if len(candidate) >= 2 and candidate[-2] == class_name:
                 return True
         return False
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..schemas import now_iso
+from .eval_cases import runtime_reliability_cases
 
 EVALUATION_SCORING_SCHEMA_VERSION = "2"
 
@@ -324,7 +325,7 @@ def build_report(batch_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
     if not cases:
         return {"batchId": batch_id, "runTime": now_iso(), "totalCases": 0, "successCases": 0,
                 "failedCases": 0, "skippedCases": 0, "businessE2ETotal": 0, "baselineCompleted": 0,
-                "newlyAddedCompleted": 0, "runtimeSafetyReliabilityCases": 10,
+                "newlyAddedCompleted": 0, "runtimeSafetyReliabilityCases": len(runtime_reliability_cases()),
                 "summaryMetrics": _empty_metrics(), "cases": [], "pipelineTrace": []}
     expected_files = [case for case in cases if case["localizationEval"]["expectedTargetFiles"]]
     expected_methods = [case for case in cases if case["localizationEval"]["expectedTargetMethods"]]
@@ -382,7 +383,7 @@ def build_report(batch_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
             "businessE2ETotal": len(business_cases),
             "baselineCompleted": sum(case.get("caseSource") == "LEGACY_BASELINE" for case in business_cases),
             "newlyAddedCompleted": sum(case.get("caseSource") == "EVAL_EXPANSION" for case in business_cases),
-            "runtimeSafetyReliabilityCases": 10,
+            "runtimeSafetyReliabilityCases": len(runtime_reliability_cases()),
             "summaryMetrics": metrics, "cases": cases,
             "pipelineTrace": cases[0]["steps"] if cases else []}
 
@@ -406,7 +407,7 @@ def summary_markdown(report: dict[str, Any]) -> str:
              f"| Business E2E Cases | {report.get('businessE2ETotal', 0)} |",
              f"| Baseline Completed | {report.get('baselineCompleted', 0)} |",
              f"| Newly Added Completed | {report.get('newlyAddedCompleted', 0)} |",
-             f"| Runtime Safety/Reliability Cases | {report.get('runtimeSafetyReliabilityCases', 10)} |",
+             f"| Runtime Safety/Reliability Cases | {report.get('runtimeSafetyReliabilityCases', len(runtime_reliability_cases()))} |",
              f"| Success Cases | {report.get('successCases', 0)} |",
              f"| Failed Cases | {report.get('failedCases', 0)} |",
              f"| Skipped / Not Executable | {report.get('skippedCases', 0)} |"]

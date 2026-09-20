@@ -78,6 +78,12 @@ async def test_release_risk_uses_patch_facts_and_independent_llm_review(tmp_path
     assert raw["verificationBlockedReason"] == "Verification failed with type=TEST_ASSERTION_FAILED"
     assert raw["releaseRiskReport"]["riskLevel"] == "HIGH"
     assert raw["knowledgeMatches"][0]["path"] == "docs/release.md"
+    governance = raw["riskGovernance"]
+    assert governance["dryRunResult"]["status"] == "FAILED"
+    assert governance["deliveryEligible"] is False
+    assert governance["approvalRequired"] is False
+    assert governance["blastRadius"]["changedFiles"] == ["src/main/java/example/OrderService.java"]
+    assert governance["rollbackPlan"]["mode"] == "DELIVERY_ONLY"
 
 
 @pytest.mark.asyncio
@@ -90,3 +96,25 @@ async def test_release_risk_disabled_uses_java_compatible_unavailable_review(tmp
     assert raw["reviewVerdict"] == "REVIEW_UNAVAILABLE"
     assert raw["humanApprovalPoints"] == ["Release risk LLM agent is disabled."]
     assert raw["codeReview"]["patchDecision"] == "HUMAN_REVIEW"
+
+
+@pytest.mark.asyncio
+async def test_release_governance_marks_verified_incident_patch_for_human_delivery(tmp_path: Path):
+    settings = Settings(codeops_agent_release_risk_llm_enabled=True, codeops_apply_mode="delivery_only")
+    llm = _ReleaseRiskLlm(settings)
+    state = _state(tmp_path)
+    state["working_memory"]["patchGeneration"]["compileGate"] = {"success": True}
+    state["working_memory"]["testVerification"] = {
+        "testsPassed": True, "recommendedTests": ["OrderServiceTest"],
+        "mavenCommands": ["mvn -q test"], "testExecutionResults": ["Tests run: 1, Failures: 0, Errors: 0"],
+    }
+
+    raw = (await CodeOpsGraph(llm)._release_risk(state))["context"]["releaseRiskRaw"]
+
+    governance = raw["riskGovernance"]
+    assert governance["dryRunResult"]["status"] == "PASSED"
+    assert governance["dryRunResult"]["executedInSandbox"] is True
+    assert governance["deliveryEligible"] is True
+    assert governance["approvalRequired"] is True
+    assert governance["rollbackPlan"]["mode"] == "DELIVERY_ONLY"
+    assert raw["releaseRiskReport"]["approvalRequired"] is True

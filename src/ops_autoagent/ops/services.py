@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import smtplib
+import statistics
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from typing import Any
+
+import numpy as np
+from sklearn.ensemble import IsolationForest
 
 from ..schemas import Alert, AlertmanagerWebhook, now_iso
 from ..store import Store
@@ -134,6 +139,340 @@ class EvidenceSignalExtractor:
                 "entity": command.get("serviceName", ""), "severity": severity or "unknown",
                 "timeWindow": f"{command.get('startTime', '')} ~ {command.get('endTime', '')}",
                 "summary": summary or "", "rawEvidence": raw_evidence or ""}
+
+
+class DeterministicAnomalyDetector:
+    """Small, dependency-free anomaly gate for telemetry before any LLM diagnosis.
+
+    It deliberately emits only explainable signals: 3-Sigma and EWMA for numeric
+    metric series, plus conservative threshold/pattern rules for logs and traces.
+    Absence of a signal is not proof of health; it only prevents normal variation
+    from being promoted to an LLM incident hypothesis.
+    """
+
+    def __init__(self, *, enabled: bool = True, three_sigma_min_samples: int = 4,
+                 ewma_alpha: float = 0.3, max_signals: int = 24):
+        self.enabled = enabled
+        self.three_sigma_min_samples = max(4, int(three_sigma_min_samples))
+        self.ewma_alpha = min(0.9, max(0.05, float(ewma_alpha)))
+        self.max_signals = max(1, int(max_signals))
+
+    def detect(self, metrics: dict[str, Any], logs: dict[str, Any], traces: dict[str, Any],
+               command: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        command = command or {}
+        signals: list[dict[str, Any]] = []
+        for name, values in self.compact_metric_series(metrics).items():
+            signals.extend(self._metric_signals(name, values, command))
+        signals.extend(self._observation_rules(metrics, command))
+        signals.extend(self._log_patterns(logs, command))
+        signals.extend(self._trace_patterns(traces, command))
+        deduped: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for signal in signals:
+            key = (str(signal.get("source")), str(signal.get("detector")), str(signal.get("name")))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(signal)
+        severity_rank = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        return sorted(deduped, key=lambda item: (severity_rank.get(str(item.get("severity")), 9),
+                                                  str(item.get("name"))))[:self.max_signals]
+
+    @classmethod
+    def compact_metric_series(cls, metrics: dict[str, Any], *, limit: int = 60) -> dict[str, list[float]]:
+        """Extract bounded numeric sequences from native or Prometheus-like payloads."""
+        source = metrics.get("anomalySeries") or metrics.get("series")
+        result: dict[str, list[float]] = {}
+        if isinstance(source, dict):
+            for name, values in source.items():
+                numeric = cls._numbers(values)
+                if numeric:
+                    result[str(name)] = numeric[-limit:]
+        raw = metrics.get("raw")
+        if result or not isinstance(raw, dict):
+            return result
+        for name, payload in raw.items():
+            numeric = cls._prometheus_numbers(payload)
+            if numeric:
+                result[str(name)] = numeric[-limit:]
+        return result
+
+    def _metric_signals(self, name: str, values: list[float], command: dict[str, Any]) -> list[dict[str, Any]]:
+        if len(values) < self.three_sigma_min_samples:
+            return []
+        baseline, latest = values[:-1], values[-1]
+        mean = statistics.fmean(baseline)
+        stddev = statistics.pstdev(baseline) if len(baseline) > 1 else 0.0
+        signals: list[dict[str, Any]] = []
+        sigma_threshold = mean + 3 * stddev
+        if latest > sigma_threshold and (stddev > 0 or latest > mean):
+            z_score = (latest - mean) / stddev if stddev > 0 else float("inf")
+            signals.append(self._signal(command, "prometheus", "THREE_SIGMA", name, latest,
+                                       "CRITICAL" if z_score >= 6 else "HIGH",
+                                       min(0.99, 0.80 + min(abs(z_score), 10) / 50),
+                                       {"mean": round(mean, 6), "stddev": round(stddev, 6),
+                                        "threshold": round(sigma_threshold, 6), "sampleCount": len(values)},
+                                       f"latest={latest:.6g} exceeds 3-Sigma threshold={sigma_threshold:.6g}"))
+        alpha, ewma = self.ewma_alpha, baseline[0]
+        for value in baseline[1:]:
+            ewma = alpha * value + (1 - alpha) * ewma
+        residual_scale = max(stddev, abs(ewma) * 0.10, 0.001)
+        ewma_threshold = ewma + 3 * residual_scale
+        if latest > ewma_threshold:
+            signals.append(self._signal(command, "prometheus", "EWMA", name, latest,
+                                       "HIGH", 0.84,
+                                       {"ewma": round(ewma, 6), "residualScale": round(residual_scale, 6),
+                                        "threshold": round(ewma_threshold, 6), "sampleCount": len(values)},
+                                       f"latest={latest:.6g} exceeds EWMA threshold={ewma_threshold:.6g}"))
+        return signals
+
+    @classmethod
+    def _observation_rules(cls, metrics: dict[str, Any], command: dict[str, Any]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for observation in metrics.get("observations") or []:
+            text = str(observation or "").strip()
+            if not text:
+                continue
+            lower = text.lower()
+            name_match = re.search(r"(?:anomaly|ok)\s*:\s*([a-zA-Z0-9_.:-]+)", text, re.IGNORECASE)
+            name = name_match.group(1) if name_match else "metric_observation"
+            latest = cls._latest_value(text)
+            threshold = cls._rule_threshold(name, latest)
+            upstream_anomaly = lower.startswith("anomaly:")
+            if upstream_anomaly or (threshold is not None and latest is not None and latest > threshold):
+                description = ("upstream metric rule marked the observation anomalous" if upstream_anomaly else
+                               f"latest={latest:.6g} exceeds deterministic threshold={threshold:.6g}")
+                result.append(cls._signal(command, "prometheus", "RULE", name, latest,
+                                          "HIGH" if upstream_anomaly else "MEDIUM", 0.88 if upstream_anomaly else 0.80,
+                                          {"threshold": threshold, "upstreamAnomaly": upstream_anomaly}, description,
+                                          evidence=text))
+        return result
+
+    @classmethod
+    def _log_patterns(cls, logs: dict[str, Any], command: dict[str, Any]) -> list[dict[str, Any]]:
+        samples = [str(value) for value in (logs.get("errorSamples") or []) if str(value).strip()]
+        if not samples:
+            return []
+        relevant = [value for value in samples if re.search(
+            r"\b(error|exception|timeout|deadlock|refused|unavailable|5\d\d)\b", value, re.IGNORECASE)]
+        if not relevant:
+            return []
+        return [cls._signal(command, "elasticsearch", "LOG_PATTERN", "error_pattern_burst", len(relevant),
+                            "HIGH" if len(relevant) >= 3 else "MEDIUM", min(0.95, 0.68 + len(relevant) * 0.06),
+                            {"matchingSamples": len(relevant), "sampleCount": len(samples)},
+                            f"{len(relevant)} error-like log samples matched deterministic incident patterns",
+                            evidence=" | ".join(relevant[:3]))]
+
+    @classmethod
+    def _trace_patterns(cls, traces: dict[str, Any], command: dict[str, Any]) -> list[dict[str, Any]]:
+        spans = [str(value) for value in (traces.get("spans") or []) if str(value).strip()]
+        if not spans:
+            return []
+        slow = [value for value in spans if cls._duration_ms(value) >= 1000]
+        errors = [value for value in spans if re.search(r"\b(error|exception|timeout|5\d\d)\b", value, re.IGNORECASE)]
+        result: list[dict[str, Any]] = []
+        if errors:
+            result.append(cls._signal(command, "skywalking", "TRACE_PATTERN", "error_trace", len(errors), "HIGH",
+                                      min(0.95, 0.72 + len(errors) * 0.05), {"matchingSpans": len(errors)},
+                                      f"{len(errors)} trace spans matched error/timeout patterns",
+                                      evidence=" | ".join(errors[:3])))
+        if slow:
+            result.append(cls._signal(command, "skywalking", "TRACE_PATTERN", "slow_trace", len(slow), "MEDIUM",
+                                      min(0.92, 0.68 + len(slow) * 0.05), {"slowSpans": len(slow), "thresholdMs": 1000},
+                                      f"{len(slow)} trace spans exceeded 1000ms", evidence=" | ".join(slow[:3])))
+        return result
+
+    @staticmethod
+    def _numbers(value: Any) -> list[float]:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return [float(value)]
+        if isinstance(value, str):
+            try:
+                return [float(value)]
+            except ValueError:
+                return []
+        if isinstance(value, dict):
+            for key in ("values", "samples", "data", "series"):
+                if key in value:
+                    return DeterministicAnomalyDetector._numbers(value[key])
+            for key in ("value", "latest"):
+                if key in value:
+                    return DeterministicAnomalyDetector._numbers(value[key])
+            return []
+        if isinstance(value, list):
+            result: list[float] = []
+            for item in value:
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    result.extend(DeterministicAnomalyDetector._numbers(item[-1]))
+                else:
+                    result.extend(DeterministicAnomalyDetector._numbers(item))
+            return result
+        return []
+
+    @classmethod
+    def _prometheus_numbers(cls, payload: Any) -> list[float]:
+        if not isinstance(payload, dict):
+            return cls._numbers(payload)
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        series = data.get("result") if isinstance(data.get("result"), list) else []
+        values: list[float] = []
+        for item in series:
+            if not isinstance(item, dict):
+                continue
+            values.extend(cls._numbers(item.get("values") or item.get("value")))
+        return values
+
+    @staticmethod
+    def _latest_value(text: str) -> float | None:
+        match = re.search(r"(?:latest|value)\s*=\s*(-?\d+(?:\.\d+)?)", text, re.IGNORECASE)
+        if not match:
+            return None
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _rule_threshold(name: str, value: float | None) -> float | None:
+        lower = name.lower()
+        if "pending" in lower or "timeout_total" in lower:
+            return 0.0
+        if "usage_percent" in lower or ("cpu" in lower and "percent" in lower):
+            return 85.0
+        if "cpu" in lower and value is not None:
+            return 0.85 if value <= 1 else 85.0
+        if any(token in lower for token in ("error_rate", "5xx_rate", "failure_rate")) and value is not None:
+            return 0.05 if value <= 1 else 5.0
+        if "p99" in lower or "latency" in lower or "duration" in lower:
+            return 1.0 if "second" in lower else 1000.0 if "ms" in lower else None
+        return None
+
+    @staticmethod
+    def _duration_ms(text: str) -> float:
+        match = re.search(r"(?:duration|latency|elapsed)\s*[=:]\s*(\d+(?:\.\d+)?)\s*(ms|s)?", text, re.IGNORECASE)
+        if not match:
+            return 0.0
+        value = float(match.group(1))
+        return value * 1000 if str(match.group(2) or "").lower() == "s" else value
+
+    @staticmethod
+    def _signal(command: dict[str, Any], source: str, detector: str, name: str, value: float | int | None,
+                severity: str, confidence: float, baseline: dict[str, Any], summary: str,
+                evidence: str = "") -> dict[str, Any]:
+        identity = json.dumps({"source": source, "detector": detector, "name": name,
+                               "entity": command.get("serviceName", ""), "summary": summary},
+                              ensure_ascii=False, sort_keys=True)
+        return {"signalId": "deterministic-" + hashlib.sha256(identity.encode()).hexdigest()[:20],
+                "source": source, "detector": detector, "signalType": "ANOMALY",
+                "name": name, "status": "ANOMALY", "entity": command.get("serviceName", ""),
+                "severity": severity, "confidence": round(float(confidence), 3),
+                "timeWindow": f"{command.get('startTime', '')} ~ {command.get('endTime', '')}",
+                "value": value, "baseline": baseline, "summary": summary,
+                "evidence": evidence[:600], "deterministic": True}
+
+
+class EnsembleAnomalyDetector(DeterministicAnomalyDetector):
+    """Production telemetry gate: explainable rules plus a real Isolation Forest.
+
+    The statistical detectors are intentionally retained because an Isolation
+    Forest score alone is not a useful incident explanation.  The model runs on
+    an aligned multi-metric window and contributes an independent vote; the
+    diagnosis agent receives both its score and the raw detector evidence.
+    """
+
+    def __init__(self, *, isolation_forest_enabled: bool = True,
+                 isolation_forest_min_samples: int = 12,
+                 isolation_forest_contamination: float = 0.10,
+                 ensemble_min_votes: int = 2, **kwargs: Any):
+        super().__init__(**kwargs)
+        self.isolation_forest_enabled = bool(isolation_forest_enabled)
+        self.isolation_forest_min_samples = max(8, int(isolation_forest_min_samples))
+        self.isolation_forest_contamination = min(0.45, max(0.01, float(isolation_forest_contamination)))
+        self.ensemble_min_votes = max(2, int(ensemble_min_votes))
+
+    def detect(self, metrics: dict[str, Any], logs: dict[str, Any], traces: dict[str, Any],
+               command: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        command = command or {}
+        signals = super().detect(metrics, logs, traces, command)
+        series = self.compact_metric_series(metrics)
+        if self.enabled and self.isolation_forest_enabled:
+            signals.extend(self._isolation_forest_signal(series, command))
+        signals.extend(self._ensemble_signals(signals, command))
+        deduped: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for signal in signals:
+            key = (str(signal.get("source")), str(signal.get("detector")), str(signal.get("name")))
+            if key not in seen:
+                seen.add(key)
+                deduped.append(signal)
+        severity_rank = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        return sorted(deduped, key=lambda item: (severity_rank.get(str(item.get("severity")), 9),
+                                                  str(item.get("name"))))[:self.max_signals]
+
+    def _isolation_forest_signal(self, series: dict[str, list[float]], command: dict[str, Any]) -> list[dict[str, Any]]:
+        eligible = {name: values for name, values in series.items()
+                    if len(values) >= self.isolation_forest_min_samples}
+        if len(eligible) < 2:
+            return []
+        sample_count = min(len(values) for values in eligible.values())
+        if sample_count < self.isolation_forest_min_samples:
+            return []
+        names = sorted(eligible)
+        matrix = np.asarray([eligible[name][-sample_count:] for name in names], dtype=float).T
+        if not np.isfinite(matrix).all() or matrix.shape[0] < self.isolation_forest_min_samples:
+            return []
+        baseline = matrix[:-1]
+        if baseline.shape[0] < self.isolation_forest_min_samples - 1:
+            return []
+        means = baseline.mean(axis=0)
+        scales = baseline.std(axis=0)
+        scales[scales < 1e-9] = 1.0
+        normalized_baseline = (baseline - means) / scales
+        normalized_latest = (matrix[-1:] - means) / scales
+        model = IsolationForest(
+            n_estimators=200,
+            contamination=self.isolation_forest_contamination,
+            random_state=42,
+            n_jobs=1,
+        )
+        model.fit(normalized_baseline)
+        prediction = int(model.predict(normalized_latest)[0])
+        decision_score = float(model.decision_function(normalized_latest)[0])
+        if prediction != -1:
+            return []
+        feature_zscores = {name: round(float(normalized_latest[0, index]), 4) for index, name in enumerate(names)}
+        dominant = sorted(feature_zscores, key=lambda name: abs(feature_zscores[name]), reverse=True)[:3]
+        confidence = min(0.98, 0.72 + min(0.22, abs(decision_score) * 2))
+        return [self._signal(
+            command, "prometheus", "ISOLATION_FOREST", "multivariate_telemetry", None,
+            "HIGH", confidence,
+            {"algorithm": "sklearn.IsolationForest", "modelVersion": "iforest-v1", "sampleCount": sample_count,
+             "featureNames": names, "decisionScore": round(decision_score, 6),
+             "contamination": self.isolation_forest_contamination, "featureZScores": feature_zscores},
+            "Isolation Forest marked the newest multi-metric observation anomalous; dominant metrics: "
+            + ", ".join(dominant),
+            evidence=json.dumps({name: float(matrix[-1, index]) for index, name in enumerate(names)}, ensure_ascii=False),
+        )]
+
+    def _ensemble_signals(self, signals: list[dict[str, Any]], command: dict[str, Any]) -> list[dict[str, Any]]:
+        anomaly_signals = [signal for signal in signals if signal.get("status") == "ANOMALY"]
+        detector_votes = {str(signal.get("detector")) for signal in anomaly_signals}
+        source_votes = {str(signal.get("source")) for signal in anomaly_signals}
+        vote_count = len(detector_votes | source_votes)
+        if vote_count < self.ensemble_min_votes:
+            return []
+        critical = any(signal.get("severity") == "CRITICAL" for signal in anomaly_signals)
+        names = sorted({str(signal.get("name")) for signal in anomaly_signals})[:8]
+        return [self._signal(
+            command, "ensemble", "ENSEMBLE", "cross_source_anomaly_consensus", vote_count,
+            "CRITICAL" if critical or len(source_votes) >= 3 else "HIGH",
+            min(0.99, 0.70 + vote_count * 0.05),
+            {"detectorVotes": sorted(detector_votes), "sourceVotes": sorted(source_votes),
+             "signalCount": len(anomaly_signals), "minimumVotes": self.ensemble_min_votes},
+            f"{vote_count} independent anomaly votes reached consensus across: {', '.join(names)}",
+        )]
 
 
 class EvidenceReviewer:
@@ -442,7 +781,6 @@ class AlertDeduplicator:
 
     async def accept(self, alert: dict[str, Any]) -> dict[str, Any]:
         now = datetime.now()
-        await self.store.put("alerts", alert["alertId"], alert, alert["updateTime"])
         dedup_key = "|".join(str(alert.get(key) or "").strip() for key in (
             "serviceName", "alertName", "fingerprint", "severity")).lower()
         reason = ""

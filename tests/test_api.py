@@ -3,9 +3,11 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import ops_autoagent.api as api_module
 from ops_autoagent.api import (_bounded_evaluation_text, _evaluation_terminal_success, _fixture_payloads, _previous_successful_eval_run,
                                api_guard_counters, app, settings, store)
 from ops_autoagent.config import get_settings
+from ops_autoagent.eventing import AIOpsEventType, EventEnvelope
 from ops_autoagent.graphs.codeops import CodeOpsGraph
 from ops_autoagent.codeops.eval_cases import (BUSINESS_EVAL_LEVEL, BASELINE_CASE_SOURCE,
                                               EXPANDED_BUSINESS_CASE_IDS, EXPANSION_CASE_SOURCE,
@@ -93,7 +95,7 @@ def test_fixture_path_resolves_to_its_case_id():
 def test_runtime_cases_are_not_business_eval_cases():
     business_ids = {case["caseId"] for case in builtin_codeops_eval_cases()}
     runtime_ids = {case["caseId"] for case in runtime_reliability_cases()}
-    assert len(runtime_ids) == 10 and business_ids.isdisjoint(runtime_ids)
+    assert len(runtime_ids) == 16 and business_ids.isdisjoint(runtime_ids)
 
 
 def test_expected_no_code_fix_is_a_valid_evaluation_terminal_state():
@@ -336,7 +338,7 @@ async def test_expanded_business_catalog_and_representative_cases_use_real_graph
     assert summary["data"]["businessE2ETotal"] == 52
     assert summary["data"]["baselineCompleted"] == 16
     assert summary["data"]["newlyAddedCompleted"] == 36
-    assert summary["data"]["runtimeSafetyReliabilityCases"] == 10
+    assert summary["data"]["runtimeSafetyReliabilityCases"] == 16
     for case_id, response in runs:
         assert response["code"] == "0000"
         run = response["data"]["runs"][0]
@@ -353,9 +355,9 @@ async def test_full_business_evaluation_report_keeps_runtime_cases_separate():
     result = response.json()["data"]
     report = report_response.json()["data"]
     assert (result["totalCases"], result["businessE2ETotal"], result["baselineCompleted"],
-            result["newlyAddedCompleted"], result["runtimeSafetyReliabilityCases"]) == (52, 52, 16, 36, 10)
+            result["newlyAddedCompleted"], result["runtimeSafetyReliabilityCases"]) == (52, 52, 16, 36, 16)
     assert (report["businessE2ETotal"], report["baselineCompleted"], report["newlyAddedCompleted"],
-            report["runtimeSafetyReliabilityCases"]) == (52, 16, 36, 10)
+            report["runtimeSafetyReliabilityCases"]) == (52, 16, 36, 16)
     required = {"caseId", "caseLifecycle", "caseSource", "evaluationLevel", "fixtureReference",
                 "expectedOutcome", "actualOutcome", "rootCauseHit", "evidenceCoverage", "localizationCoverage",
                 "patchGenerated", "verificationStatus", "reviewDecision", "scopeGuardStatus", "toolCallCount",
@@ -418,3 +420,42 @@ async def test_alertmanager_empty_payload_and_message_match_legacy_contract():
     assert empty.json() == {"code": "0002", "info": "alert webhook payload cannot be empty", "data": None}
     assert accepted.json()["data"] == {"totalAlerts": 1, "acceptedCount": 0, "skippedCount": 1,
                                         "message": "alert webhook accepted"}
+
+
+@pytest.mark.asyncio
+async def test_accepted_alert_is_atomically_staged_in_outbox_when_kafka_ingestion_is_enabled(monkeypatch):
+    monkeypatch.setattr(api_module, "_kafka_alert_ingestion_enabled", lambda: True)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/v1/ops/alert/webhook/alertmanager", json={"alerts": [{
+            "status": "firing", "fingerprint": "kafka-outbox-1",
+            "labels": {"alertname": "OrderErrorRate", "service": "orders", "severity": "critical"},
+            "annotations": {"summary": "order failures exceed threshold"},
+        }]})
+    assert response.json()["data"]["acceptedCount"] == 1
+    outbox = await store.recent("outbox_events", 10)
+    assert len(outbox) == 1 and outbox[0]["status"] == "PENDING"
+    envelope = EventEnvelope.model_validate(outbox[0]["envelope"])
+    assert envelope.event_type == AIOpsEventType.ALERT
+    assert set(envelope.payload) == {"alert", "command", "dispatch"}
+    assert (await store.get("alerts", envelope.payload["alert"]["alertId"])) is not None
+    assert (await store.get("dispatches", envelope.payload["dispatch"]["dispatchId"])) is not None
+
+
+@pytest.mark.asyncio
+async def test_accepted_alert_routes_to_codeops_without_running_a_second_ops_parent_graph(monkeypatch):
+    calls: list[dict] = []
+
+    async def fake_trigger(alert, command, *, dispatch=None, retry_on_failure=False):
+        calls.append({"alert": alert, "command": command, "dispatch": dispatch,
+                      "retry": retry_on_failure})
+
+    monkeypatch.setattr(api_module, "_trigger_codeops_alert", fake_trigger)
+    dispatch = {"dispatchId": "dispatch-codeops-only", "eventId": "alert-codeops-only",
+                "dispatchStatus": "NEW", "updateTime": "2026-01-01T00:00:00"}
+    await api_module._run_accepted_alert(
+        {"alertId": "alert-codeops-only", "serviceName": "orders"}, dispatch,
+        {"serviceName": "orders", "diagnosisId": "diag-codeops-only"}, retry_on_failure=True)
+    assert len(calls) == 1 and calls[0]["retry"] is True
+    persisted = await store.get("dispatches", "dispatch-codeops-only")
+    assert persisted["dispatchStatus"] == "RUNNING"
+    assert persisted["routedTo"] == "CodeOpsGraph.ops_diagnosis"

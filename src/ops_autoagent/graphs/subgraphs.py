@@ -16,6 +16,9 @@ from typing import Any, TypedDict
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
+from ..config import Settings
+from ..ops import EnsembleAnomalyDetector
+from ..topology import Neo4jTopologyService, TopologyUnavailable
 from ..schemas import (
     EvidenceReviewContract,
     InvestigationDecisionContract,
@@ -105,6 +108,21 @@ class OpsEvidenceSubgraph(_ContractSubgraph):
     node_name = "collect_and_review_evidence"
     allowed_tools = ("query_prometheus", "query_elasticsearch", "query_skywalking_trace", "query_runbook")
 
+    def __init__(self, runner: Runner | None = None, checkpointer: Any | None = None,
+                 anomaly_detector: EnsembleAnomalyDetector | None = None, settings: Settings | None = None):
+        settings = settings or Settings()
+        self.anomaly_detector = anomaly_detector or EnsembleAnomalyDetector(
+            enabled=settings.ops_deterministic_anomaly_enabled,
+            three_sigma_min_samples=settings.ops_anomaly_three_sigma_min_samples,
+            ewma_alpha=settings.ops_anomaly_ewma_alpha,
+            max_signals=settings.ops_anomaly_max_signals,
+            isolation_forest_enabled=settings.ops_anomaly_isolation_forest_enabled,
+            isolation_forest_min_samples=settings.ops_anomaly_isolation_forest_min_samples,
+            isolation_forest_contamination=settings.ops_anomaly_isolation_forest_contamination,
+            ensemble_min_votes=settings.ops_anomaly_ensemble_min_votes,
+        )
+        super().__init__(runner=runner, checkpointer=checkpointer)
+
     @staticmethod
     def _default_runner(input_state: dict[str, Any]) -> dict[str, Any]:
         bundle = input_state.get("evidenceBundle") if isinstance(input_state.get("evidenceBundle"), dict) else {}
@@ -120,10 +138,57 @@ class OpsEvidenceSubgraph(_ContractSubgraph):
             review_payload["sufficient"] = review_payload.get("status") == "SUFFICIENT"
         review = EvidenceReviewContract.model_validate(review_payload)
         output["evidenceReview"] = review.model_dump(by_alias=True)
-        output.setdefault("evidenceBundle", {"artifactRefs": output.get("artifactRefs", []), "signals": []})
+        bundle = output.get("evidenceBundle") if isinstance(output.get("evidenceBundle"), dict) else {}
+        if not bundle:
+            bundle = input_state.get("evidenceBundle") if isinstance(input_state.get("evidenceBundle"), dict) else {}
+        bundle = dict(bundle)
+        metrics = bundle.get("metrics") if isinstance(bundle.get("metrics"), dict) else {}
+        logs = bundle.get("logs") if isinstance(bundle.get("logs"), dict) else {}
+        traces = bundle.get("traces") if isinstance(bundle.get("traces"), dict) else {}
+        command = {"serviceName": input_state.get("serviceName", ""),
+                   "startTime": input_state.get("startTime", ""), "endTime": input_state.get("endTime", "")}
+        deterministic = self.anomaly_detector.detect(metrics, logs, traces, command)
+        existing = bundle.get("signals") if isinstance(bundle.get("signals"), list) else []
+        bundle["signals"] = [*existing, *deterministic]
+        output["evidenceBundle"] = bundle or {"artifactRefs": output.get("artifactRefs", []), "signals": []}
+        output["deterministicAnomalies"] = deterministic
         output["status"] = review.status
         if review.status != "SUFFICIENT":
             output["blockedReason"] = review.status
+        return output
+
+
+class GraphRcaSubgraph(_ContractSubgraph):
+    """Read-only Neo4j topology/change correlation stage for incident RCA."""
+
+    name = "graph_rca"
+    node_name = "correlate_topology"
+    allowed_tools = ("neo4j.topology", "neo4j.change_correlation")
+
+    def __init__(self, topology_service: Neo4jTopologyService, checkpointer: Any | None = None):
+        self.topology_service = topology_service
+        super().__init__(runner=self._correlate, checkpointer=checkpointer)
+
+    async def _correlate(self, input_state: dict[str, Any]) -> dict[str, Any]:
+        bundle = input_state.get("evidenceBundle") if isinstance(input_state.get("evidenceBundle"), dict) else {}
+        signals = bundle.get("signals") if isinstance(bundle.get("signals"), list) else []
+        traces = bundle.get("traces") if isinstance(bundle.get("traces"), dict) else {}
+        spans = traces.get("spans") if isinstance(traces.get("spans"), list) else []
+        service = str(input_state.get("serviceName") or "").strip()
+        if not service:
+            return {"status": "TOPOLOGY_UNAVAILABLE", "blockedReason": "service name is required for graph RCA"}
+        try:
+            correlation = await self.topology_service.correlate(service, signals, [str(item) for item in spans])
+        except TopologyUnavailable as exc:
+            return {"status": "TOPOLOGY_UNAVAILABLE", "blockedReason": str(exc)}
+        return {"status": str(correlation.get("status") or "READY"), "topologyCorrelation": correlation,
+                "summary": "Neo4j topology, change and trace correlation completed."}
+
+    def _validate_output(self, output: dict[str, Any], input_state: dict[str, Any]) -> dict[str, Any]:
+        correlation = output.get("topologyCorrelation")
+        if isinstance(correlation, dict):
+            output["topologyCorrelation"] = correlation
+            output["rootCauseCandidates"] = correlation.get("rootCauseCandidates", [])
         return output
 
 
@@ -220,6 +285,11 @@ class IndependentReviewSubgraph(_ContractSubgraph):
             contract.review_verdict = "ACCEPT_WITH_HUMAN_REVIEW"
             contract.patch_decision = "HUMAN_REVIEW"
             contract.must_review = [*contract.must_review, "Deterministic patch/test facts prevent release-ready routing."]
+        if contract.risk_governance.approval_required and contract.review_verdict in {"RELEASE_READY", "ACCEPT"}:
+            contract.review_verdict = "ACCEPT_WITH_HUMAN_REVIEW"
+            contract.patch_decision = "HUMAN_REVIEW"
+            contract.must_review = [*contract.must_review,
+                                    "Deterministic release governance requires a human delivery decision."]
         normalized = contract.model_dump(by_alias=True)
         normalized["review"] = normalized.copy()
         normalized["reviewFallback"] = contract.review_verdict == "REVIEW_UNAVAILABLE"

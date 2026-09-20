@@ -193,6 +193,28 @@ class RetryInstructionsContract(BaseModel):
         return [str(item).strip() for item in value if str(item).strip()]
 
 
+class ReleaseRiskGovernanceContract(BaseModel):
+    """Deterministic release gate facts, independent from the reviewer narrative."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    risk_level: Literal["LOW", "MEDIUM", "HIGH", "UNKNOWN"] = Field(default="UNKNOWN", alias="riskLevel")
+    blast_radius: dict[str, Any] = Field(default_factory=dict, alias="blastRadius")
+    dry_run_result: dict[str, Any] = Field(default_factory=dict, alias="dryRunResult")
+    approval_required: bool = Field(default=False, alias="approvalRequired")
+    delivery_eligible: bool = Field(default=False, alias="deliveryEligible")
+    auto_apply_eligible: bool = Field(default=False, alias="autoApplyEligible")
+    confidence: str = Field(default="LOW", alias="confidence")
+    rollback_plan: dict[str, Any] = Field(default_factory=dict, alias="rollbackPlan")
+    observation_metrics: list[str] = Field(default_factory=list, alias="observationMetrics")
+    approval_reasons: list[str] = Field(default_factory=list, alias="approvalReasons")
+
+    @field_validator("observation_metrics", "approval_reasons")
+    @classmethod
+    def normalize_governance_lists(cls, value: list[Any]) -> list[str]:
+        return [str(item).strip() for item in value if str(item).strip()]
+
+
 class ReleaseReviewContract(BaseModel):
     """Independent reviewer output; deterministic facts are checked by the subgraph."""
 
@@ -218,6 +240,8 @@ class ReleaseReviewContract(BaseModel):
     concurrency_risks: list[str] = Field(default_factory=list, alias="concurrencyRisks")
     reasoning: list[str] = Field(default_factory=list)
     quality_score: int = Field(default=0, ge=0, le=100, alias="qualityScore")
+    risk_governance: ReleaseRiskGovernanceContract = Field(default_factory=ReleaseRiskGovernanceContract,
+                                                            alias="riskGovernance")
 
     @field_validator("must_review", "human_approval_points", "review_findings", "business_risks",
                      "concurrency_risks", "reasoning")

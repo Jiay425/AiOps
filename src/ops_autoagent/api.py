@@ -33,7 +33,12 @@ from .store import Store
 from .observability import redact
 from .persistence import CheckpointerManager
 from .executors import CallerRunsBoundedExecutor
+from .eventing import AIOpsEventType, EventEnvelope, KafkaConsumerWorker, KafkaPublisher
+from .outbox import OutboxRelay
 from .tools import ObservabilityTools
+from .topology import Neo4jTopologyService, TopologyUnavailable
+from .runbook_actions import RunbookActionRequest, RunbookActionService
+from .telemetry import configure_telemetry, shutdown_telemetry
 from .ops import (AlertDeduplicator, AlertNormalizer, NotificationService, NotificationTemplateService,
                   OpsDemoDataAutoSeeder, RunbookRagService, SensitiveMasker, ServiceOwnerService)
 from .codeops import AgentLoopService, CodeOpsSecurityGovernance, EngineeringToolGateway, IncidentScheduler
@@ -50,11 +55,16 @@ store = Store(settings.ops_database_path, settings.mysql_url, settings.mysql_use
               settings.mysql_pool_connect_timeout_seconds)
 llm = OpenAICompatibleClient(settings)
 ops_graph = OpsDiagnosisGraph(ObservabilityTools(settings), llm, store)
-codeops_graph = CodeOpsGraph(llm, store)
+topology_service = Neo4jTopologyService(settings)
+codeops_graph = CodeOpsGraph(llm, store, topology_service=topology_service)
+event_publisher = KafkaPublisher(settings)
+outbox_relay = OutboxRelay(store, event_publisher, settings)
+event_consumer: KafkaConsumerWorker | None = None
 evaluation_state: dict[str, Any] = {"lastReport": None, "schedulerRunning": False}
 alert_normalizer = AlertNormalizer()
 alert_deduplicator = AlertDeduplicator(store, settings.ops_alert_dedup_window_minutes)
 runbook_rag = RunbookRagService(settings)
+runbook_actions = RunbookActionService(settings)
 background_jobs: set[asyncio.Task] = set()
 incident_scheduler: IncidentScheduler | None = None
 checkpoint_manager = CheckpointerManager(settings)
@@ -73,15 +83,59 @@ api_guard_lock = asyncio.Lock()
 api_guard_masker = SensitiveMasker()
 
 
+async def _record_consumed_kafka_event(envelope: EventEnvelope) -> None:
+    """Apply a durable Kafka event before its offset is committed.
+
+    Alerts are the only externally-triggered command in this service.  They are
+    persisted to the Outbox by the webhook and are deliberately *started here*,
+    not by the HTTP request.  ``KafkaConsumerWorker`` records the idempotency
+    key only after this function returns, so a failed diagnosis/repair remains
+    eligible for Kafka redelivery instead of being silently acknowledged.
+    """
+    payload = redact(envelope.payload)
+    receipt = {"receiptId": envelope.idempotency_key, "eventId": envelope.event_id,
+               "eventType": str(envelope.event_type), "taskId": envelope.task_id,
+               "correlationId": envelope.correlation_id, "payload": payload,
+               "receivedAt": now_iso()}
+    await store.put("event_receipts", envelope.idempotency_key, receipt, receipt["receivedAt"])
+    if envelope.event_type == AIOpsEventType.ALERT:
+        await _consume_alert_event(envelope)
+
+
+def _kafka_alert_ingestion_enabled() -> bool:
+    """Whether Alertmanager hands off accepted alerts through the durable Outbox."""
+    return event_publisher.configured and bool(getattr(settings, "kafka_alert_ingestion_enabled", True))
+
+
+async def _consume_alert_event(envelope: EventEnvelope) -> None:
+    """Run the existing incident and CodeOps flows from a validated alert event."""
+    payload = envelope.payload
+    alert, command, dispatch = payload.get("alert"), payload.get("command"), payload.get("dispatch")
+    if not all(isinstance(value, dict) for value in (alert, command, dispatch)):
+        raise ValueError("Kafka alert event requires alert, command and dispatch objects")
+    if str(dispatch.get("eventId")) != str(alert.get("alertId")):
+        raise ValueError("Kafka alert dispatch does not match alert id")
+    # Persisted dispatch status makes the work visible to operators before any
+    # potentially slow LLM/tool call begins.  The consumer commits only after
+    # both branches return, retaining Kafka's at-least-once retry semantics.
+    await _run_accepted_alert(dict(alert), dict(dispatch), dict(command), retry_on_failure=True)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global incident_scheduler, ops_graph, codeops_graph, bounded_executor
+    global incident_scheduler, ops_graph, codeops_graph, bounded_executor, event_consumer
     bounded_executor = CallerRunsBoundedExecutor(settings.thread_pool_max_size, settings.thread_pool_queue_size)
     asyncio.get_running_loop().set_default_executor(bounded_executor)
     await store.initialize()
+    production_mode = str(settings.ops_runtime_mode).strip().lower() == "production"
+    await topology_service.start(required=production_mode and settings.ops_topology_enabled)
+    await event_publisher.start(required=production_mode)
+    await outbox_relay.start()
+    event_consumer = KafkaConsumerWorker(settings, store, event_publisher, _record_consumed_kafka_event)
+    await event_consumer.start(required=production_mode)
     checkpointer = await checkpoint_manager.start()
     ops_graph = OpsDiagnosisGraph(ObservabilityTools(settings), llm, store, checkpointer)
-    codeops_graph = CodeOpsGraph(llm, store, checkpointer)
+    codeops_graph = CodeOpsGraph(llm, store, checkpointer, topology_service=topology_service)
     await _reconcile_waiting_approvals()
     if settings.ops_runbook_vector_enabled:
         try:
@@ -109,14 +163,24 @@ async def lifespan(_: FastAPI):
         if background_jobs:
             await asyncio.gather(*tuple(background_jobs), return_exceptions=True)
         background_jobs.clear()
+        await outbox_relay.stop()
+        if event_consumer is not None:
+            await event_consumer.stop()
+            event_consumer = None
+        await event_publisher.close()
+        await topology_service.close()
         await store.close()
         await checkpoint_manager.close()
+        shutdown_telemetry(app)
         bounded_executor.shutdown(wait=True, cancel_futures=True)
         bounded_executor = None
 
 
 app = FastAPI(title="Ops AutoAgent", version="2.0.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
+# Instrument before the ASGI stack starts handling requests.  The lifecycle
+# still owns exporter shutdown; disabled local settings perform no setup.
+configure_telemetry(app, settings)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -304,7 +368,11 @@ async def _save_guard_audit(request: Request, session_id: str | None, action: st
 
 @app.get("/actuator/health")
 async def health() -> dict[str, Any]:
-    return {"status": "UP", "components": {"langgraph": {"status": "UP"}, "database": {"status": "UP"}}}
+    topology_status = "UP" if topology_service.driver is not None else (
+        "NOT_CONFIGURED" if not topology_service.configured else "DOWN")
+    status = "UP" if topology_status in {"UP", "NOT_CONFIGURED"} else "DOWN"
+    return {"status": status, "components": {"langgraph": {"status": "UP"}, "database": {"status": "UP"},
+            "neo4j": {"status": topology_status}}}
 
 
 @app.get("/actuator/info")
@@ -312,9 +380,31 @@ async def info() -> dict[str, Any]:
     return {"app": "ops-autoagent-diagnosis", "runtime": "python-langgraph", "version": "2.0.0"}
 
 
+@app.post("/api/v1/ops/runbook/dry-run")
+async def runbook_dry_run(request: RunbookActionRequest) -> ApiResponse:
+    """Admission-validated Kubernetes dry-run; it never performs a real write."""
+    return ok(await runbook_actions.dry_run(request))
+
+
 @app.get("/actuator/prometheus")
 async def prometheus() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/api/v1/topology/{service_name}")
+async def get_service_topology(service_name: str) -> Any:
+    try:
+        return ok(await topology_service.topology(service_name))
+    except (TopologyUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/topology/{service_name}/correlation")
+async def get_topology_correlation(service_name: str) -> Any:
+    try:
+        return ok(await topology_service.correlate(service_name, [], []))
+    except (TopologyUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/ops/incident/analyze")
@@ -357,9 +447,31 @@ async def alertmanager(body: AlertmanagerWebhook) -> ApiResponse:
                         "diagnosisId": command["diagnosisId"], "serviceName": alert["serviceName"],
                         "dedupKey": decision["dedupKey"], "dispatchStatus": "NEW",
                         "createTime": created, "updateTime": created}
-            await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
-            for coroutine in (_dispatch_alert(alert, dispatch, command), _trigger_codeops_alert(alert, command)):
-                job = asyncio.create_task(coroutine)
+            # The request owns only validation, de-duplication and durable
+            # acceptance.  When Kafka is configured, the consumer owns the
+            # actual LangGraph execution after the Outbox has confirmed a
+            # broker delivery.  This keeps an Alertmanager retry from creating
+            # a second diagnosis while the first request is still in flight.
+            if _kafka_alert_ingestion_enabled():
+                event_alert = {**alert, "rawPayload": "[REDACTED_RAW_ALERT_PAYLOAD]"}
+                envelope = EventEnvelope(
+                    eventId=f"evt-alert-{alert['alertId']}", eventType=AIOpsEventType.ALERT,
+                    incidentId=command["diagnosisId"], correlationId=dispatch["dispatchId"],
+                    idempotencyKey=f"alert:{alert['alertId']}:{decision['dedupKey']}",
+                    payload={"alert": redact(event_alert), "command": redact(command), "dispatch": redact(dispatch)},
+                )
+                outbox = OutboxRelay.pending_record(envelope)
+                await store.put_many([
+                    ("alerts", alert["alertId"], redact(alert), created),
+                    ("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"]),
+                    ("outbox_events", outbox["outboxId"], outbox, outbox["updateTime"]),
+                ])
+            else:
+                await store.put_many([
+                    ("alerts", alert["alertId"], redact(alert), created),
+                    ("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"]),
+                ])
+                job = asyncio.create_task(_run_accepted_alert(alert, dispatch, command))
                 background_jobs.add(job)
                 job.add_done_callback(background_jobs.discard)
         else:
@@ -368,7 +480,10 @@ async def alertmanager(body: AlertmanagerWebhook) -> ApiResponse:
                         "serviceName": alert["serviceName"], "dedupKey": decision["dedupKey"],
                         "dispatchStatus": "SKIPPED", "skipReason": decision["reason"],
                         "createTime": now_iso(), "endTime": now_iso(), "updateTime": now_iso()}
-            await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
+            await store.put_many([
+                ("alerts", alert["alertId"], redact(alert), dispatch["updateTime"]),
+                ("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"]),
+            ])
         raw_labels, raw_annotations = raw_alert.labels or {}, raw_alert.annotations or {}
         if incident_scheduler and raw_alert.fingerprint is not None:
             await incident_scheduler.ingest(
@@ -599,11 +714,13 @@ def _trace_highlights(skill_id: str | None, raw: dict[str, Any]) -> dict[str, An
             "llmReviewError", "opsDiagnosis", "patchDraft", "repairPlan", "exactReplaceBlocks",
             "exactReplaceApply", "failureDiagnostic", "repairObservations", "patchAttempts",
             "patchValidation", "patchApply", "rootCause", "confidence", "llmGenerated",
+            "deterministicAnomalies", "deterministicAnomalySignals",
             "llmErrorMessage", "codeSnippets", "mavenCommands", "recommendedTests", "coverageGaps",
             "testExecutionResults", "testExecutionAsync", "queuedBackgroundTasks", "backgroundToolTasks",
             "taskNotifications", "testPatchGenerated", "testPatchTargetFiles", "testPatchDraft",
             "testPatchValidation", "testPatchApply", "riskPoints", "codeReview", "reviewVerdict",
             "qualityScore", "patchDecision", "observationMetrics", "rollbackConcerns",
+            "riskGovernance", "blastRadius", "dryRunResult", "approvalRequired", "deliveryEligible", "rollbackPlan",
             "manualTakeoverRequired", "autoPatchBlockedReason", "verificationBlockedReason",
             "blockedAutomationSummary", "agentRuntime", "toolRuntime")
     result = {key: raw[key] for key in keys if raw.get(key) is not None}
@@ -638,7 +755,12 @@ def _working_memory_summary(task: dict[str, Any]) -> dict[str, Any]:
                     "releaseRisk": ("codeReview", "reviewVerdict", "qualityScore", "patchDecision",
                     "patchFacts", "releaseRiskReport", "humanApprovalPoints", "releaseRiskReasoning",
                     "manualTakeoverRequired", "autoPatchBlockedReason", "verificationBlockedReason",
-                    "blockedAutomationSummary")}
+                    "blockedAutomationSummary", "riskGovernance", "blastRadius", "dryRunResult",
+                    "approvalRequired", "deliveryEligible", "rollbackPlan", "observationMetrics")}
+        ops_evidence = memory.get("opsEvidence")
+        if isinstance(ops_evidence, dict) and ops_evidence:
+            summary["opsEvidence"] = _pick(ops_evidence, "serviceName", "timeWindow", "traceId",
+                                             "evidenceCoverage", "evidenceSources", "deterministicAnomalies")
         for name, keys in compact.items():
             source = memory.get(name)
             if isinstance(source, dict) and source:
@@ -700,7 +822,8 @@ def _incident_fix_view(task: dict[str, Any]) -> dict[str, Any]:
     merged_raw: dict[str, Any] = {}
     for step in task.get("steps", []):
         merged_raw.update(_json(step.get("rawEvidenceJson")))
-    artifacts = {"evidence": _pick(merged_raw, "evidenceCoverage", "evidenceProvenance", "evidenceSources", "evidenceDetails"),
+    artifacts = {"evidence": _pick(merged_raw, "evidenceCoverage", "evidenceProvenance", "evidenceSources",
+                                    "evidenceDetails", "deterministicAnomalies"),
                  "localization": _stage_artifacts("code_localization", merged_raw),
                  "patch": _stage_artifacts("code_repair", merged_raw),
                  "tests": _stage_artifacts("test_verification", merged_raw),
@@ -718,7 +841,8 @@ def _pick(source: dict[str, Any], *keys: str) -> dict[str, Any]:
 
 
 def _stage_artifacts(stage_id: str, raw: dict[str, Any]) -> dict[str, Any]:
-    keys = {"ops_evidence": ("evidenceCoverage", "evidenceProvenance", "evidenceSources", "rootCause", "confidence", "traceId"),
+    keys = {"ops_evidence": ("evidenceCoverage", "evidenceProvenance", "evidenceSources", "rootCause", "confidence", "traceId",
+                              "deterministicAnomalies"),
             "code_localization": ("targetFiles", "targetMethods", "suspiciousLocations", "localizationConfidence",
                 "codeSearchMatches", "finalAnswer", "turns", "trace", "recommendedTests", "strategyType",
                 "fixStrategy", "scopeDecisionType", "rootCauseLocationType", "directEvidenceFiles", "relatedFiles",
@@ -736,7 +860,9 @@ def _stage_artifacts(stage_id: str, raw: dict[str, Any]) -> dict[str, Any]:
             "release_risk": ("releaseRiskReport", "humanApprovalPoints", "releaseRiskReasoning", "codeReview",
                 "reviewVerdict", "qualityScore", "patchDecision", "patchFacts", "modelRouting",
                 "manualTakeoverRequired", "autoPatchBlockedReason", "verificationBlockedReason",
-                "blockedAutomationSummary", "repairObservations", "patchAttempts")}
+                "blockedAutomationSummary", "riskGovernance", "blastRadius", "dryRunResult",
+                "approvalRequired", "deliveryEligible", "rollbackPlan", "observationMetrics",
+                "repairObservations", "patchAttempts")}
     return _pick(raw, *keys.get(stage_id, ()))
 
 
@@ -2055,28 +2181,36 @@ def _alert_incident_command(alert: dict[str, Any]) -> dict[str, Any]:
             "diagnosisId": f"diag-{uuid.uuid4()}"}
 
 
-async def _dispatch_alert(alert: dict[str, Any], dispatch: dict[str, Any], command: dict[str, Any]) -> None:
-    dispatch.update(dispatchStatus="RUNNING", startTime=now_iso(), updateTime=now_iso())
+async def _run_accepted_alert(alert: dict[str, Any], dispatch: dict[str, Any], command: dict[str, Any], *,
+                              retry_on_failure: bool = False) -> None:
+    """Hand an accepted alert to the single production CodeOpsGraph.
+
+    ``OpsDiagnosisGraph`` remains only behind its legacy direct-diagnosis API
+    for migration compatibility. Alertmanager and Kafka must not run it as a
+    second parent graph: CodeOpsGraph's ``ops_diagnosis`` stage is the one
+    Diagnosis Agent in the production Incident-to-Fix path.
+    """
+    dispatch.update(dispatchStatus="RUNNING", startTime=dispatch.get("startTime") or now_iso(),
+                    routedTo="CodeOpsGraph.ops_diagnosis", updateTime=now_iso())
     await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
-    try:
-        request = IncidentAnalyzeRequest(serviceName=command["serviceName"], startTime=command["startTime"],
-                                         endTime=command["endTime"], problem=command["problem"],
-                                         traceId=command.get("traceId") or None, maxStep=command["maxStep"],
-                                         endpoint=command.get("endpoint", ""))
-        diagnosis = await ops_graph.invoke(request, session_id=command["sessionId"],
-                                           diagnosis_id=command["diagnosisId"])
-        record = _diagnosis_record(diagnosis)
-        await store.put("diagnoses", diagnosis["diagnosis_id"], record, record["updateTime"])
-        await _notify_diagnosis(alert, diagnosis, record)
-        dispatch.update(dispatchStatus="SUCCESS", endTime=now_iso(), updateTime=now_iso())
-    except Exception as exc:
-        dispatch.update(dispatchStatus="FAILED", skipReason=str(exc)[:1000], endTime=now_iso(), updateTime=now_iso())
-    await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
+    await _trigger_codeops_alert(alert, command, dispatch=dispatch, retry_on_failure=retry_on_failure)
 
 
-async def _trigger_codeops_alert(alert: dict[str, Any], command: dict[str, Any]) -> None:
+async def _trigger_codeops_alert(alert: dict[str, Any], command: dict[str, Any], *,
+                                 dispatch: dict[str, Any] | None = None,
+                                 retry_on_failure: bool = False) -> None:
     if not settings.codeops_incident_to_fix_alert_enabled:
+        if dispatch is not None:
+            dispatch.update(dispatchStatus="SKIPPED", codeopsDispatchStatus="SKIPPED",
+                            codeopsSkipReason="incident-to-fix disabled", endTime=now_iso(), updateTime=now_iso())
+            await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
         return
+    if dispatch is not None:
+        existing = await store.get("dispatches", str(dispatch["dispatchId"]))
+        if existing and existing.get("codeopsDispatchStatus") == "SUCCESS":
+            return
+        dispatch = {**(existing or dispatch), "codeopsDispatchStatus": "RUNNING", "updateTime": now_iso()}
+        await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
     labels, annotations = alert.get("labels", {}), alert.get("annotations", {})
     repository = (labels.get("repository") or labels.get("repo") or labels.get("code_repository")
                   or annotations.get("repository") or annotations.get("repo")
@@ -2105,8 +2239,17 @@ async def _trigger_codeops_alert(alert: dict[str, Any], command: dict[str, Any])
         result = await codeops_graph.invoke(request)
         task = result["task"]
         await store.put("tasks", task["taskId"], task, task["updateTime"])
-    except Exception:
-        return
+        if dispatch is not None:
+            dispatch.update(dispatchStatus="SUCCESS", codeopsDispatchStatus="SUCCESS", codeopsTaskId=task["taskId"],
+                            codeopsEndTime=now_iso(), endTime=now_iso(), updateTime=now_iso())
+            await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
+    except Exception as exc:
+        if dispatch is not None:
+            dispatch.update(dispatchStatus="FAILED", codeopsDispatchStatus="FAILED", codeopsError=type(exc).__name__,
+                            codeopsEndTime=now_iso(), endTime=now_iso(), updateTime=now_iso())
+            await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
+        if retry_on_failure:
+            raise
 
 
 async def _notify_diagnosis(alert: dict[str, Any], diagnosis: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:

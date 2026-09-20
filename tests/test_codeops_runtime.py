@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -154,6 +155,18 @@ public class OrderService {
     assert not guard["passed"]
     assert "OrderService.calculateTotal" in guard["changedMethods"]
     assert any("calculateTotal" in item for item in guard["violations"])
+
+
+def test_java_scope_guard_allows_helper_only_in_an_approved_multi_method_class(tmp_path: Path):
+    source = tmp_path / "src/main/java/example/OrderService.java"
+    source.parent.mkdir(parents=True)
+    old, new = "public class OrderService { public void submit() {} }", (
+        "public class OrderService { public void submit() { claim(); } private void claim() {} }")
+    proposal = PatchProposal(summary="atomic helper", patches=[FilePatch(path="src/main/java/example/OrderService.java", old=old, new=new)])
+    guard = PatchScopeGuard().validate(tmp_path, proposal, {"scopeType": "MULTI_METHOD",
+        "targetFiles": ["src/main/java/example/OrderService.java"], "targetMethods": ["example.OrderService#submit()"],
+        "allowNewHelperMethods": True})
+    assert guard["passed"]
 
 
 def test_java_scope_guard_does_not_treat_record_declaration_as_constructor_method():
@@ -354,3 +367,42 @@ def test_human_approval_requires_generated_patch_and_real_passing_tests():
     state["steps"][2]["rawEvidenceJson"] = '{"releaseRiskReport":{"riskLevel":"HIGH"}}'
     state["steps"][1]["rawEvidenceJson"] = '{"testExecutionResults":"BUILD FAILURE"}'
     assert CodeOpsGraph._approval_payload(state) is None
+
+
+def test_high_confidence_verified_patch_routes_to_auto_apply_only_in_apply_mode():
+    graph = object.__new__(CodeOpsGraph)
+    graph.settings = SimpleNamespace(codeops_auto_apply_enabled=True, codeops_apply_mode="apply_to_worktree")
+    state = {
+        "task": {"taskType": "INCIDENT_TO_FIX"},
+        "steps": [{"rawEvidenceJson":
+                   '{"riskGovernance":{"autoApplyEligible":true},"reviewVerdict":"ACCEPT_WITH_HUMAN_REVIEW"}'}],
+    }
+    assert graph._auto_apply_eligible(state) is True
+    graph.settings.codeops_apply_mode = "delivery_only"
+    assert graph._auto_apply_eligible(state) is False
+    graph.settings.codeops_apply_mode = "apply_to_worktree"
+    state["steps"][0]["rawEvidenceJson"] = '{"riskGovernance":{"autoApplyEligible":true},"reviewVerdict":"REVIEW_UNAVAILABLE"}'
+    assert graph._auto_apply_eligible(state) is False
+
+
+def test_auto_apply_policy_normalizes_numeric_localization_confidence():
+    graph = object.__new__(CodeOpsGraph)
+    graph.settings = SimpleNamespace(codeops_auto_apply_enabled=True, codeops_apply_mode="apply_to_worktree",
+                                     codeops_auto_apply_min_confidence="HIGH")
+    state = {"task": {"taskType": "INCIDENT_TO_FIX"},
+             "working_memory": {"codeLocalization": {"localizationConfidence": 0.92}}}
+    facts = {"patchGenerated": True, "scopeGuardPassed": True, "staticSafetyPassed": True,
+             "patchApplied": True, "compilePassed": True, "testsPassed": True,
+             "changedFiles": ["src/main/java/App.java"], "changedMethods": ["App.run"],
+             "productionFileCount": 1, "testFileCount": 0, "configFileCount": 0}
+    governance = graph._release_governance(state, {"riskLevel": "MEDIUM"}, facts)
+    assert governance["confidence"] == "HIGH"
+    assert governance["autoApplyEligible"] is True
+    assert governance["approvalRequired"] is False
+
+
+def test_auto_approval_uses_effect_boundary_repository_digest(tmp_path: Path):
+    (tmp_path / "app.py").write_text("value = 1\n", encoding="utf-8")
+    graph = object.__new__(CodeOpsGraph)
+    state = {"task": {"repository": str(tmp_path)}, "context": {"repoBaselineSnapshot": {"wrong": "shape"}}}
+    assert graph._current_baseline_digest(state) == graph._current_repository_digest(str(tmp_path))

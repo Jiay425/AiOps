@@ -614,4 +614,10 @@ def runtime_reliability_cases() -> list[dict[str, Any]]:
         {"caseId": "runtime-checkpoint-restart", "category": "reliability", "assertions": ["subgraph and parent checkpoint restore"]},
         {"caseId": "runtime-trace-redaction", "category": "security", "assertions": ["prompt and secrets absent from trace/SSE"]},
         {"caseId": "runtime-unauthorized-write-zero", "category": "security", "assertions": ["unauthorized target writes == 0"]},
+        {"caseId": "runtime-event-envelope-contract", "category": "reliability", "assertions": ["event schemaVersion and idempotencyKey are required"]},
+        {"caseId": "runtime-outbox-resume-idempotency", "category": "reliability", "assertions": ["checkpoint replay never resets a PUBLISHED outbox record"]},
+        {"caseId": "runtime-kafka-dlq", "category": "reliability", "assertions": ["terminal delivery failure retains the original envelope in DLQ"]},
+        {"caseId": "runtime-neo4j-graph-rca", "category": "safety", "assertions": ["RCA candidates contain graph path/change/trace provenance"]},
+        {"caseId": "runtime-isolation-forest", "category": "reliability", "assertions": ["multi-metric Isolation Forest output exposes model score and feature evidence"]},
+        {"caseId": "runtime-runbook-server-dry-run", "category": "safety", "assertions": ["runbook actions use Kubernetes dryRun=All and never write production"]},
     ]

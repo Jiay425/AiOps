@@ -8,400 +8,308 @@
 
 # Ops AutoAgent Diagnosis
 
-### 从告警到自动修复的 LangGraph Agent
+### 从告警到可验证自动修复的 LangGraph Agent
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#快速开始)
-[![LangGraph](https://img.shields.io/badge/LangGraph-1.2.9-1C3C3C?logo=langchain&logoColor=white)](#langgraph-运行时)
-[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](#api-接口)
-[![Checkpoints](https://img.shields.io/badge/执行-SQLite%20%7C%20PostgreSQL-336791?logo=postgresql&logoColor=white)](#持久化执行)
-[![Eval](https://img.shields.io/badge/评测-52%2B%20业务案例-6E40C9)](#评测体系)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![LangGraph](https://img.shields.io/badge/LangGraph-StateGraph-1C3C3C?logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](src/ops_autoagent/api.py)
+[![Eval](https://img.shields.io/badge/Eval-52%20Business%20%2B%2016%20Runtime-6E40C9)](docs/eval-report.md)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**从告警开始，完成故障诊断、代码定位、补丁生成、测试验证和人工审批。**
+**收到告警后，先看证据，再定位代码、生成补丁、编译测试、独立审查；高置信且全部门禁通过时自动应用到受控工作区。**
 
 </div>
 
 ---
 
-## 它是怎么工作的？
+## 它做什么
 
-线上出现告警后，Agent 会先读取监控指标、日志、调用链和 Runbook，
-再让 LLM 判断最可能的故障原因。接着，它会去代码仓库中定位相关文件和方法，
-在受控沙箱里生成补丁，执行编译和测试，最后交给独立的代码审查 Agent。
-只有人工审批后，补丁才可能被应用到目标仓库。
+订单重复提交告警不应只得到一段“可能是幂等问题”的模型回答。这个项目把故障推进成可核验的修复闭环：
 
-这个项目是从 Spring AI/Spring Boot 迁移到 Python + LangGraph 的版本。
-LangGraph 负责保存每一步状态、控制 Agent 循环、暂停等待审批，以及在中断后继续执行：
+```text
+告警
+  → 指标 / 日志 / Trace / Runbook
+  → 异常检测 + 图谱关联 RCA
+  → 代码定位
+  → PatchSandbox 生成补丁
+  → Maven 编译与测试
+  → 独立风险审查
+  → 自动应用 / 低置信度人工确认
+```
+
+模型只能提出诊断和补丁，没有直接写仓库的工具。经过策略、摘要校验和审计保护的 `apply_approved_patch` 是唯一写入入口。
+
+## 三个 Agent，各做一件事
+
+| Agent | 输入与输出 | 副作用边界 |
+| --- | --- | --- |
+| **Diagnosis Agent** | 汇总 Metrics、Logs、Traces、Runbook、异常信号和 Neo4j 根因候选，输出故障假设与定位约束。 | 只读 |
+| **Repair Agent** | 搜索代码和测试，在受控 PatchSandbox 中生成最小补丁和验证计划。 | 仅 PatchSandbox |
+| **Review Agent** | 根据真实 Scope Guard、编译、测试、dry-run 和风险事实，输出结构化发布结论。 | 只读 |
+
+`CodeOpsGraph` 是父图：统一管理阶段顺序、修复重试、Checkpoint、SSE 事件和写入权限。领域子图处理证据、图谱 RCA、仓库调查、补丁、验证和独立审查，但没有全局写权限。
+
+```mermaid
+flowchart LR
+    A[Alert / Issue] --> B[FastAPI / Kafka]
+    B --> C[CodeOpsGraph]
+    C --> D[Diagnosis Agent]
+    D --> E[OpsEvidenceSubgraph]
+    E --> F[3-Sigma · EWMA · Rules · Isolation Forest]
+    D --> G[GraphRcaSubgraph]
+    G --> H[Neo4j topology · change · trace]
+    C --> I[Repair Agent]
+    I --> J[Repository investigation]
+    J --> K[PatchSandbox]
+    K --> L[Maven compile / test]
+    L --> M[Review Agent]
+    M -->|high confidence + gates passed| N[auto_approve_patch]
+    M -->|low confidence / high risk| O[interrupt / resume]
+    N --> P[apply_approved_patch]
+    O --> P
+    C -. checkpoint .-> Q[(SQLite / PostgreSQL)]
+    C -. event / artifact / metric .-> R[(MySQL / Kafka)]
+```
+
+## 已真实跑通的端到端 Case
+
+**场景：订单重复提交导致重复写入。** 观测输入来自仓库内脱敏的 `TEST_SIMULATED_DATA` Fixture；模型、代码修改、Maven 验证和受控工作区应用是真实执行，Fixture 不会被伪装成线上结果。
+
+| 阶段 | 本次执行结果 |
+| --- | --- |
+| 模型 | DeepSeek Flash（OpenAI-compatible API） |
+| 故障定位 | `OrderSubmitService` 的“先检查、后标记”并发竞态 |
+| 补丁 | 新增同步原子操作 `markProcessedIfAbsent`，调用方只执行该操作 |
+| 修改范围 | `IdempotencyService.java`、`OrderSubmitService.java` |
+| 验证 | Scope Guard、静态安全、Maven 编译、`IdempotencyServiceAtomicityTest` 均通过 |
+| 审查与执行 | `ACCEPT_WITH_HUMAN_REVIEW`；策略确认高置信且全部门禁通过后自动应用 |
+| 审计 | 17 次工具调用，约 313 秒；保存 Patch Digest、前后校验和、Effect Log |
+
+完整过程见 [订单幂等 Case Study](docs/incident-case-study.md)。
+
+## 5 分钟跑起来
+
+### 离线 Demo：无需模型、无需基础设施
+
+```powershell
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -e ".[dev]"
+.venv/Scripts/python.exe -m ops_autoagent.demo
+```
+
+离线 Demo 只把模型输出替换成确定性适配器；父图、子图、PatchSandbox、Scope Guard、Maven 验证、Review 和 Checkpoint 都是生产实现。默认只交付补丁制品，不修改目标仓库。
+
+### 全栈 Demo：真实模型 + Kafka + Neo4j + MySQL
+
+```powershell
+Copy-Item deploy/.env.full.example deploy/.env.full.local
+# 在未跟踪的 deploy/.env.full.local 填入基础设施密码；不要提交 API Key。
+docker compose --env-file deploy/.env.full.local -f deploy/docker-compose.full.yml up -d --build
+
+$env:OPENAI_BASE_URL = "https://api.deepseek.com"
+$env:OPENAI_MODEL = "deepseek-flash"
+$env:OPENAI_API_KEY = "<your-api-key>"
+Invoke-RestMethod -Method Post http://127.0.0.1:8099/api/v1/codeops/evaluation/run/incident-order-idempotency-race
+```
+
+完整命令、预期输出和边界说明见 [Demo 指南](docs/demo.md)。
+
+## 为什么不是“调一下 LLM”的 Demo
+
+| 能力 | 实现 | 价值 |
+| --- | --- | --- |
+| 可解释异常检测 | 3-Sigma、EWMA、规则和 Isolation Forest 先输出结构化信号。 | 减少普通波动被模型误判。 |
+| 图谱关联 RCA | Neo4j 查询服务依赖、近期变更和 Trace 路径。 | 根因候选有拓扑和变更证据。 |
+| 持久化编排 | LangGraph `StateGraph`、条件路由、子图、SQLite/PostgreSQL Checkpoint。 | 任务可中断、恢复、回放。 |
+| 可靠事件链路 | 版本化 Event Contract、事务 Outbox、Kafka 幂等消费、DLQ。 | 不把 LangGraph 状态机误做成消息队列。 |
+| 受控修复 | PatchSandbox、Scope Guard、Patch/Baseline Digest、唯一 Effect Boundary。 | 防止越界修改和审批后仓库漂移。 |
+| 风险分流 | 高置信低风险自动应用到受控工作区；其余 `interrupt/resume`。 | 自动化仍有控制面。 |
+| 可复盘评测 | 52 条业务 E2E Case + 16 条运行时安全/可靠性 Case，Trace/SSE 可回放。 | 失败能定位到具体阶段。 |
+
+## 运行时架构：谁负责什么
 
 ~~~text
-故障 / Issue / Code Task
-          │
-          ▼
-证据包 ──► 结构化诊断 ──► 仓库调查
-  │                              │
-  │                              ▼
-  └──────────────────────────► 补丁提案
-                                     │
-                                     ▼
-                            编译 / 测试验证
-                                     │
-                                     ▼
-                            独立代码审查
-                                     │
-                             人工审批 / 仅交付
+告警 / Webhook / Issue
+        │
+        ├── FastAPI：同步提交、SSE 回放、审批和评测接口
+        └── Kafka：异步接入、削峰、重试和 DLQ
+                         │
+                         ▼
+                   CodeOpsGraph（单任务控制面）
+                         │
+       ┌─────────────────┼──────────────────┐
+       ▼                 ▼                  ▼
+  LangGraph Checkpoint  MySQL 投影       Neo4j / Runbook
+  当前节点、状态恢复    Task/Event/Outbox 拓扑、变更、依赖
+                         │
+                         ▼
+              PatchSandbox → 验证 → 唯一写入边界
 ~~~
 
-简单说，它就是一个“从告警到自动修复”的 Agent，但每一步都能查看、回放和限制。
-模型只能提出修改建议，不能直接改生产代码。
+Kafka 不会替代 LangGraph：Kafka 负责把外部事件可靠送进系统；每一条
+Incident-to-Fix 任务内部的状态、条件路由、重试、暂停和恢复仍由 CodeOpsGraph 管理。
 
-## 核心亮点
-
-| | 能力 | 含义 |
-| --- | --- | --- |
-| 🧭 | 先看证据再下结论 | 先采集 Metrics、Logs、Traces 和 Runbook，再生成故障诊断。 |
-| 🔎 | 自动定位代码 | Agent 通过只读工具搜索仓库、查看调用关系和相关测试。 |
-| 🛠️ | 自动生成补丁 | 补丁先在受控沙箱中生成和校验，不直接写入目标仓库。 |
-| 🧪 | 编译和测试 | 修改后自动执行验证，并把结果交给审查 Agent。 |
-| ⏸️ | 人工审批 | <code>interrupt()</code> 可以暂停流程，审批后使用同一个 <code>thread_id</code> 继续。 |
-| 🔐 | 安全写入边界 | 只有 <code>apply_approved_patch</code> 可以真正修改目标仓库。 |
-| 📊 | 可复盘评测 | 52 条业务 E2E Case、10 条安全/可靠性 Case，以及完整的事件和运行时指标。 |
-
-## 架构
-
-项目包含两个顶层图入口。<code>CodeOpsGraph</code> 负责从故障诊断走到代码修复；
-<code>OpsDiagnosisGraph</code> 是独立的运维诊断入口，负责采集线上信息、生成诊断报告
-和输出 SSE 事件。两者可以共享证据结果，但线上观测工具不会直接修改代码仓库。
-
-~~~mermaid
-flowchart LR
-    U[告警 / Issue / API 请求] --> F[FastAPI]
-    F --> C[CodeOpsGraph]
-
-    C --> P[plan]
-    P --> O[orchestrate]
-    O --> D[诊断阶段]
-    D --> E[OpsEvidenceSubgraph]
-    E --> X[Metrics / Logs / Traces / Runbooks]
-    D --> I[RepositoryInvestigationSubgraph]
-    I --> R[修复阶段]
-    R --> S[RepairProposalSubgraph]
-    S --> V[VerificationSubgraph]
-    V --> Q[IndependentReviewSubgraph]
-
-    Q -->|ACCEPT / HUMAN_REVIEW| H[interrupt: 人工审批]
-    Q -->|RETRY_REPAIR| R
-    Q -->|REJECT / NO_CODE_FIX| Z[summarize]
-    H -->|审批交付| L[deliver_patch]
-    H -->|审批应用| A[apply_approved_patch]
-    H -->|拒绝| N[rejected]
-    L --> Z
-    A --> Z
-    N --> Z
-
-    C -. 持久化状态 .-> K[(LangGraph Checkpointer)]
-    C -. 事件 / 制品 / 指标 .-> M[(Store)]
-    A -. 唯一生产写入 .-> T[目标仓库]
-
-    OD[OpsDiagnosisGraph] --> OE[固定观测采集]
-    OE --> OR[证据审查 / 报告]
-    OR --> OS[SSE Stream]
-~~~
-
-### 三类 Agent 职责
-
-即使实现层通过多个专用 Skill Node 进行路由，业务职责仍然明确分为三类：
-
-| 角色 | 输入 | 输出 | 副作用边界 |
-| --- | --- | --- | --- |
-| **Diagnosis Agent** | 故障上下文和固定线上观测源 | 证据包、根因候选、置信度、缺失证据和修复约束 | 只读 |
-| **Repair Agent** | 诊断契约和仓库上下文 | 定位文件/方法、补丁提案、Patch Digest、验证计划 | 仅受管 Patch Sandbox |
-| **Review Agent** | 补丁事实、Scope Guard、编译/测试结果和风险上下文 | 结构化发布结论、重试约束和人工审批点 | 只读 |
-
-父图统一负责时序、预算、审批、重试策略和副作用。Agent 不能通过直接调用
-工具绕过这些策略。
-
-## 图拓扑
-
-### <code>CodeOpsGraph</code> —— 自动修复流程
+### 父图与领域子图
 
 ~~~text
 START
-  → plan
-  → orchestrate
+  → plan → orchestrate
       ├─ ops_diagnosis
+      │    ├─ OpsEvidenceSubgraph
+      │    └─ GraphRcaSubgraph
       ├─ agent_loop_investigation
-      ├─ repo_understanding
-      ├─ engineering_knowledge_rag
-      ├─ bug_fix
-      ├─ test_verification
-      ├─ release_risk_analysis
-      └─ pr_review
+      ├─ repo_understanding / engineering_knowledge_rag
+      ├─ RepairProposalSubgraph
+      ├─ VerificationSubgraph
+      └─ IndependentReviewSubgraph
   → finish
-      ├─ retry_repair → repair_feedback → bug_fix
-      ├─ approval → prepare_approval → human_approval
-      │                         ├─ deliver_patch
-      │                         ├─ apply_approved_patch
-      │                         └─ rejected
+      ├─ retry_repair → repair_feedback → RepairProposalSubgraph
+      ├─ auto_approve_patch → apply_approved_patch
+      ├─ human_approval → interrupt / resume
       └─ summarize → END
 ~~~
 
-Orchestrator 根据任务类型、Working Memory、已执行 Skill、关注范围和剩余预算
-选择下一步。每个路由最终都回到父图，因此任务状态、尝试次数和副作用始终由
-父图统一维护。
+| 子图 | 内部阶段 | 产物 | 是否可写 |
+| --- | --- | --- | --- |
+| OpsEvidenceSubgraph | prepare → collect → publish | 证据包、负证据、异常信号 | 否 |
+| GraphRcaSubgraph | prepare → correlate → publish | 拓扑路径、变更关联、根因候选 | 否 |
+| RepositoryInvestigationSubgraph | prepare → readonly investigation → publish | 代码片段、调用关系、测试与约束 | 否 |
+| RepairProposalSubgraph | prepare → sandbox proposal → publish | Patch Proposal、Digest、验证计划 | 仅沙箱 |
+| VerificationSubgraph | prepare → run verification → publish | 编译、测试、超时和日志摘要 | 否 |
+| IndependentReviewSubgraph | prepare → review facts → publish | 发布结论、风险、重试约束 | 否 |
 
-### 可复用子图
+### LangGraph 能力落地
 
-每个子图都是一个独立编译的 <code>StateGraph</code>，拥有小而稳定的状态契约。
-父图以任务级 <code>thread_id</code> 调用子图，只把经过校验的输出和 Artifact
-引用挂回父状态。
+| 能力 | 代码中的作用 |
+| --- | --- |
+| Typed State | CodeOpsState、OpsState 和 Pydantic 契约让 Node 传递结构化事实，而不是不透明聊天文本。 |
+| Conditional Edge | orchestrate、finish、审批与应用路由，把下一步显式变成可测试的策略。 |
+| Reducer | events、tool trace、effect log 采用追加 reducer，重试和并行不会覆盖历史。 |
+| Fan-out / Fan-in | Metrics、Logs、Traces 并发采集，在 Evidence Barrier 确定性汇合。 |
+| Checkpoint | Memory、SQLite、PostgreSQL 保存当前节点、恢复状态、补丁摘要与修复上下文。 |
+| Streaming | astream updates 与 FastAPI SSE 实时输出 Node、子图、测试和 Effect。 |
+| Bounded loop | repair feedback 与 attempt/tool/retry budget 允许改进但不会无限循环。 |
 
-| 子图 | 内部流程 | 职责 |
+## 生产控制面
+
+### 异常检测先于 LLM
+
+OpsEvidenceSubgraph 先将原始遥测转成可解释信号，再交给 Diagnosis Agent：
+
+| 检测器 | 擅长发现 | 输出 |
 | --- | --- | --- |
-| <code>OpsEvidenceSubgraph</code> | <code>prepare_input → collect_and_review_evidence → publish_contract</code> | 规范化线上证据和证据充分性，不写入代码。 |
-| <code>RepositoryInvestigationSubgraph</code> | <code>prepare_input → readonly_investigation → publish_contract</code> | 只读执行仓库搜索、快照、文件片段、Diff、历史、测试和工程知识检索。 |
-| <code>RepairProposalSubgraph</code> | <code>prepare_input → sandbox_repair_proposal → publish_contract</code> | 在受管 Patch Sandbox 内生成并校验补丁提案。 |
-| <code>VerificationSubgraph</code> | <code>prepare_input → run_verification → publish_contract</code> | 把编译、测试和后台任务事实规范化为验证契约。 |
-| <code>IndependentReviewSubgraph</code> | <code>prepare_input → review_patch_facts → publish_contract</code> | 校验独立代码审查结果，并对不安全的发布结论降级。 |
+| 3-Sigma | 突发尖峰、明显偏离基线 | z-score、基线、严重度 |
+| EWMA | 持续趋势、缓慢劣化 | 平滑趋势、偏离方向 |
+| 规则 | 错误码、超时、日志模式 | 明确命中的证据和阈值 |
+| Isolation Forest | 多指标组合异常 | 多维异常分数与特征摘要 |
 
-这种拆分让工作流可以被检查：一个 Checkpoint 同时可以展示父图当前节点和
-子图产生的领域制品。
+成功查询但没有发现异常会作为负证据保留，模型不能把它改写成“数据缺失”。
 
-## LangGraph 运行时
-
-本项目使用 LangGraph 构建持久化状态机，而不是只把它当作 Prompt Router。
-
-| LangGraph 能力 | 项目中的位置 | 作用 |
-| --- | --- | --- |
-| Typed Graph State | <code>CodeOpsState</code>、<code>OpsState</code>、<code>SubgraphState</code> | Node 之间传递结构化状态，而不是不透明的聊天文本。 |
-| Conditional Edge | <code>orchestrate</code>、<code>finish</code>、<code>human_approval</code>、<code>apply_approved_patch</code> | 路由决策显式化、可测试化。 |
-| Reducer | <code>events</code>、<code>tool_trace</code>、<code>effect_log</code> 使用追加型 List Reducer | 并行分支和重复尝试追加历史，而不是覆盖历史。 |
-| Fan-out / Fan-in | Metrics、Logs、Traces 并行采集和 Evidence Barrier | 独立证据源可以并发执行，并在屏障节点确定性汇合。 |
-| Nested Subgraph | 五个 CodeOps 领域子图 | 子图保持领域契约内聚，父图仍拥有全局策略控制权。 |
-| Checkpoint | Memory、SQLite、PostgreSQL Saver | 任务可以被检查、恢复，并跨进程对账。 |
-| Interrupt / Resume | <code>interrupt()</code> 和 <code>Command(resume=...)</code> | 人工审批暂停图执行，同时保留完整运行状态。 |
-| Streaming | <code>astream(..., stream_mode="updates")</code> 和 FastAPI SSE | 客户端接收 Node 事件并回放任务时间线。 |
-| 有界反馈循环 | Repair Feedback、轮次限制、Tool Budget、Retry Budget | Agent 自主性受到确定性预算约束。 |
-
-### 持久化执行
-
-每个 CodeOps 任务都使用任务 ID 作为 LangGraph 的 <code>thread_id</code>。
-Checkpointer 保存当前节点、待处理 Interrupt、Approval Identity、Patch Digest
-和重试上下文：
-
-~~~json
-{
-  "threadId": "task-id",
-  "currentNode": ["human_approval"],
-  "status": "WAITING_APPROVAL",
-  "approvalId": "approval-id",
-  "interruptPending": true
-}
-~~~
-
-通过配置选择 Checkpoint 后端：
+### Neo4j 图谱关联 RCA
 
 ~~~text
-memory      进程内测试和短生命周期开发运行
-sqlite      默认的本地持久化部署
-postgres    多进程 / 服务化部署
+api-gateway → order-service → payment-service → mysql-primary
+                         └→ inventory-service → redis
 ~~~
 
-终态的内存 Checkpoint 会被清理；可恢复的审批 Checkpoint 会保留。这样既能让
-本地开发保持可预测，也不会改变持久化后端契约。
+Neo4j 保存服务、依赖、数据库、Topic、变更和 Runbook 的受控快照。GraphRcaSubgraph 将
+拓扑、近期变更、调用链和异常信号组合为带路径和来源的根因候选；图不可用时会明确标记
+NOT_CONFIGURED 或 UNAVAILABLE，不会编造拓扑。
 
-## 数据与安全边界
-
-模型提出意图，运行时负责校验并物化副作用：
+### Kafka、Outbox 与 DLQ
 
 ~~~text
-LLM 意图
-  → 类型化诊断 / 调查 / 补丁 / 审查契约
-  → Scope Guard + Patch Validation
-  → 受管 Patch Sandbox
-  → 编译和测试验证
-  → 独立代码审查
-  → 人工审批 Interrupt
-  → 交付制品或 apply_approved_patch
-  → 目标仓库
+Alert webhook
+  → MySQL: Alert + Dispatch + Outbox（同一事务）
+  → Kafka: aiops.alerts.v1 / aiops.events.v1
+  → idempotent consumer
+  → CodeOpsGraph
+  → failure → aiops.dlq.v1
 ~~~
 
-- 模型不会获得直接写入生产仓库的工具。
-- 补丁生成隔离在 <code>RepairProposalSubgraph</code> 和 <code>PatchSandbox</code> 后。
-- <code>apply_approved_patch</code> 是唯一的生产仓库变更边界。
-- <code>CODEOPS_APPLY_MODE=delivery_only</code> 保持为保守默认值。
-- Scope Guard、Patch Validation、Baseline Digest 和 Patch Digest 防止审批后
-  目标仓库状态发生未察觉的漂移。
-- Review 输出必须经过结构化校验，并与确定性的补丁/测试事实对照；不安全的
-  <code>RELEASE_READY</code> 结论会降级为人工审查。
-- Trace、SSE、Event 和 Eval Projection 都经过脱敏和长度限制。
-- 密钥只允许放在未跟踪的本地 <code>.env</code> 或部署平台 Secret Manager 中，
-  不进入源码、Fixture 或提交后的评测输出。
+- Outbox 只有收到 Kafka 成功确认后才迁移为 PUBLISHED。
+- 每个事件包含版本和 idempotencyKey，重复投递不会重复启动修复。
+- 无法解析或超过预算的消息带原始 envelope 与错误分类进入 DLQ。
 
-## 证据层
+## 安全模型
 
-~~~text
-Prometheus Metrics ─┐
-ELK Logs           ─┼──► Evidence Signals ───► Diagnosis Contract
-SkyWalking Traces  ─┤
-Runbook Retrieval  ─┘
-~~~
+```text
+LLM proposal
+  → Pydantic contract validation
+  → Scope Guard + PatchSandbox
+  → compile / test + independent review
+  → policy decision
+  → apply_approved_patch (the only write boundary)
+```
 
-证据会保留来源、可用性、负证据和审查约束。一个数据源如果成功查询但没有发现
-异常，会被保留为负证据，而不会被静默地当成缺失数据。
+- 默认 `CODEOPS_APPLY_MODE=delivery_only`，只交付补丁制品。
+- 全栈受控演示可开启 `apply_to_worktree`；它只允许写入显式声明的工作区，**不是生产仓库授权**。
+- 自动应用必须同时满足：策略启用、`INCIDENT_TO_FIX`、高置信、低/中风险、低爆炸半径、Scope Guard、PatchSandbox、编译和测试全部通过。
+- 其余情况进入 `interrupt()`，以同一 `thread_id` 用 `Command(resume=...)` 恢复。
+- Trace、SSE、事件和评测投影会脱敏、截断；密钥不进入源码、Fixture、日志或提交记录。
 
-CodeOps 父图把诊断契约作为仓库调查的输入。独立 Ops 图还支持串行/并行采集、
-Evidence Barrier、由审查结果驱动的补充采集，以及面向事件诊断的 SSE Stream。
+### 风险分流
 
-## 评测体系
+| 条件 | 处理结果 |
+| --- | --- |
+| 高置信、低/中风险、低爆炸半径，且全部验证门禁通过 | 自动批准并应用到显式允许的受控工作区。 |
+| 置信度不足、风险高、测试不充分、Scope Guard 拒绝或策略关闭 | 不写目标仓库；交付补丁或通过 interrupt() 等待人工决定。 |
+| Patch Digest / Baseline Digest 不匹配 | 拒绝应用，避免审批与实际仓库状态脱节。 |
+| 目标路径越界或未授权 | Scope Guard 拒绝，记录安全事件。 |
 
-仓库提供的是 Case Catalog 和执行 Harness，而不是一个手工挑选的 Demo：
+Runbook 动作使用 Kubernetes server-side dry-run；它会请求 API Server 校验 Admission、
+Policy 和 Schema，但不会修改集群。
 
-| 套件 | 覆盖范围 | 状态 |
-| --- | --- | --- |
-| 业务 E2E | 52 条：16 条历史基线 + 36 条扩展 Case | 标记为 <code>E2E_BUSINESS</code> |
-| 运行时安全 / 可靠性 | 10 条 | 与业务效果单独报告 |
-| Fixture Provenance | 脱敏事件遥测和样例仓库 | 每条 Case 记录 Fixture 引用及复用关系 |
-
-业务 Case 覆盖分布式一致性、数据库与基础设施故障、配置问题、代码质量、
-Issue-to-Patch、发布风险、范围治理、验证和 Reviewer 反馈。
-
-评测报告将以下维度明确拆开：
-
-~~~text
-证据质量
-根因 / 代码定位质量
-补丁提案质量
-验证结果
-审查结论
-修复尝试次数与预算
-Checkpoint / SSE Replay 行为
-Scope Guard 与未授权写入安全性
-~~~
-
-Fixture 运行会显式标记来源。如果真实 LLM 或外部服务不可用，Harness 会报告
-对应阶段不可用，而不会伪造 Reviewer、Maven 或线上观测成功。
-
-## API 接口
-
-FastAPI 将图暴露为标准 HTTP 和 SSE 契约：
+## API、SSE 与可观测性
 
 | 能力 | Endpoint |
 | --- | --- |
-| 服务健康检查 | <code>GET /actuator/health</code> |
-| OpenAPI | <code>GET /docs</code> |
-| Ops 诊断流 | <code>POST /api/v1/ops/incident/analyze</code> |
-| CodeOps 任务提交 | <code>POST /api/v1/codeops/task/submit</code> |
-| CodeOps 任务事件 / 回放 | <code>GET /api/v1/codeops/task/{task_id}/events</code> |
-| 审批状态 | <code>GET /api/v1/codeops/evaluation/approval/{task_id}</code> |
-| 业务评测 Catalog | <code>GET /api/v1/codeops/evaluation/cases</code> |
-| 评测汇总 | <code>GET /api/v1/codeops/evaluation/summary</code> |
-| 运行时安全 Case | <code>GET /api/v1/codeops/evaluation/runtime/cases</code> |
-| Prometheus 指标 | <code>GET /actuator/prometheus</code> |
+| 服务健康检查 | GET /actuator/health |
+| OpenAPI | GET /docs |
+| CodeOps 任务提交 | POST /api/v1/codeops/task/submit |
+| 任务事件与 SSE 回放 | GET /api/v1/codeops/task/{task_id}/events |
+| 任务观测投影 | GET /api/v1/codeops/task/{task_id}/observability |
+| 业务 Case Catalog | GET /api/v1/codeops/evaluation/cases |
+| 运行时安全 Case | GET /api/v1/codeops/evaluation/runtime/cases |
+| Prometheus 指标 | GET /actuator/prometheus |
 
-SSE Projection 只包含有界的事件摘要、Artifact 引用、Subgraph/Node 身份、
-Attempt 编号和回放元数据，不暴露完整 Prompt、密钥或不受限制的工具响应。
+SSE 只输出有界摘要、节点/子图身份、尝试次数、Artifact 引用和回放元数据；完整 Prompt、
+密钥和不受限制的工具响应不会出现在事件流中。
 
-## 仓库结构
+MySQL 投影保存 Task、Event、Artifact、Runtime Metric、Outbox 与 Effect Log；
+Prometheus 记录子图耗时、LLM 调用、审批等待、SSE 回放、Scope Guard 拒绝、修复轮次和
+未授权写入次数。
 
-~~~text
-ops-autoagent-diagnosis-python/
-├── src/ops_autoagent/
-│   ├── graphs/
-│   │   ├── codeops.py       # CodeOps 父图和路由策略
-│   │   ├── ops.py           # 独立事件诊断图
-│   │   ├── subgraphs.py     # 领域子图和契约
-│   │   └── state_models.py  # Reducer、Digest 和持久化状态辅助函数
-│   ├── codeops/             # 工具、修复服务、评测器和策略
-│   ├── ops/                 # 观测、Runbook 和事件服务
-│   ├── api.py               # FastAPI、SSE、审批和评测接口
-│   ├── persistence.py       # LangGraph Checkpoint 后端选择
-│   ├── schemas.py            # Pydantic 契约
-│   └── config.py             # 基于环境变量的配置
-├── tests/                    # 图、API、安全和回归测试
-├── fixtures/incident/        # 脱敏事件和评测 Fixture
-├── samples/                  # 样例仓库和验证资产
-├── docs/                     # 迁移、架构和 Runbook 文档
-├── pyproject.toml
-└── .env.example
-~~~
+## 评测与文档
 
-## 快速开始
-
-要求 Python 3.11 或更高版本。
-
-~~~powershell
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install -e ".[dev]"
-Copy-Item .env.example .env
-.venv/Scripts/python.exe -m ops_autoagent.main
-~~~
-
-默认本地服务监听 <code>http://127.0.0.1:8099</code>：
-
-~~~text
-console      /
-OpenAPI      /docs
-health       /actuator/health
-metrics      /actuator/prometheus
-~~~
-
-只在本地 <code>.env</code> 中配置凭证和服务地址。默认开发姿态是支持 Fixture、
-启用 Checkpoint、并保持 Delivery-only。
-
-## 配置
-
-| 变量 | 用途 |
+| 想了解什么 | 从这里开始 |
 | --- | --- |
-| <code>OPENAI_BASE_URL</code> / <code>OPENAI_API_KEY</code> / <code>OPENAI_MODEL</code> | OpenAI-compatible 模型服务地址、密钥和模型 |
-| <code>LANGGRAPH_CHECKPOINT_BACKEND</code> | <code>memory</code>、<code>sqlite</code> 或 <code>postgres</code> |
-| <code>LANGGRAPH_CHECKPOINT_PATH</code> | SQLite Checkpoint 文件 |
-| <code>LANGGRAPH_CHECKPOINT_POSTGRES_URL</code> | PostgreSQL Checkpoint 连接 |
-| <code>CODEOPS_HITL_APPROVAL_ENABLED</code> | 是否在交付/应用前启用审批 Interrupt |
-| <code>CODEOPS_APPLY_MODE</code> | 保守默认值：<code>delivery_only</code> |
-| <code>CODEOPS_SUBGRAPHS_ENABLED</code> | 是否启用领域子图契约 |
-| <code>OPS_FIXTURE_FALLBACK</code> | 本地验证时是否允许确定性 Fixture |
-| <code>PROMETHEUS_BASE_URL</code> / <code>ELK_BASE_URL</code> / <code>SKYWALKING_GRAPHQL_URL</code> | 外部观测数据源 |
-| <code>OPS_RUNBOOK_PATH</code> / <code>PGVECTOR_URL</code> | Runbook 来源和可选向量检索 |
+| 立即运行一个 Case | [Demo 指南](docs/demo.md) |
+| 看订单幂等修复全过程 | [Case Study](docs/incident-case-study.md) |
+| 看生产拓扑与验证顺序 | [生产架构与验证](docs/production-architecture.md) |
+| 学 LangGraph 在项目里如何落地 | [LangGraph 迁移说明](docs/langgraph-migration.md) |
+| 查 52 + 16 条 Case 的统计边界 | [Eval 说明](docs/eval-report.md) |
 
-不要把生产凭证、私钥或 Bearer Token 放进仓库。使用被 Git 忽略的
-<code>.env</code> 或部署平台的 Secret Manager。
-
-## 验证
-
-执行仓库验证脚本：
-
-~~~powershell
-powershell -File scripts/verify.ps1 -Python .venv/Scripts/python.exe
-~~~
-
-也可以执行重点检查：
-
-~~~powershell
+```powershell
 .venv/Scripts/python.exe -m pytest -q
 .venv/Scripts/python.exe -m compileall src
 git diff --check
-~~~
+```
 
-仓库记录的最近一次迁移/评测验证已通过 Python 测试、编译检查、Diff 检查和
-样例 Maven 验证。真实 LLM、Prometheus、ELK、SkyWalking 和 Maven 的结果仍然
-取决于运行环境，不会从 Fixture 的存在推断出来。
-
-## 迁移说明
-
-项目保留了原 Spring AI 版本的领域意图——事件证据、Runbook 上下文、仓库修复、
-风险审查和验证，同时把执行语义迁移到 Python 和 LangGraph：
+## 项目结构
 
 ~~~text
-Spring AI / Spring Boot Services
-              ↓ 迁移
-Python 3.11 + LangGraph + FastAPI
+src/ops_autoagent/
+├── graphs/       # CodeOps 父图、子图、状态、路由和 Checkpoint 协作
+├── codeops/      # 仓库工具、PatchSandbox、验证、策略和 Eval
+├── ops/          # Metrics / Logs / Traces / Runbook 与异常检测
+├── topology.py   # Neo4j 拓扑查询与图谱 RCA
+├── eventing.py   # Kafka Event Contract、Consumer、DLQ
+├── outbox.py     # MySQL Transactional Outbox
+├── api.py        # FastAPI、SSE、审批与评测接口
+└── persistence.py# SQLite / PostgreSQL Checkpoint 后端
 ~~~
 
-重要变化不只是编程语言。State、Routing、Checkpoint、Interrupt、Subgraph、
-Streaming 和 Effect Boundary 现在都直接呈现在图中，因此每次运行更容易检查、
-回放、测试和解释。
+完整的部署步骤、拓扑快照契约和安全验证顺序在 [生产架构与验证](docs/production-architecture.md)。
 
-## 项目范围
-
-Ops AutoAgent Diagnosis 是工程自动化和决策支持 Harness。它不是无人值守的生产
-发布器，不替代 SRE 审批，也不保证每个故障都存在代码修复。当证据、模型访问、
-仓库上下文或验证能力不足时，运行时会保留限制信息，并在合适的边界停止。
+如果这个项目对你有帮助，欢迎点个 ⭐。

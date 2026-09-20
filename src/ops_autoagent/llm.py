@@ -34,7 +34,12 @@ class OpenAICompatibleClient:
         thinking_type = str(getattr(self.settings, "codeops_llm_thinking_type", "disabled") or "").strip().lower()
         request_payload = {"model": selected_model, "messages": messages, "temperature": 0.1,
                            "max_tokens": int(max_tokens or getattr(self.settings, "codeops_llm_max_output_tokens", 2048) or 2048)}
-        if selected_model.lower().startswith("deepseek-v4") and thinking_type in {"enabled", "disabled"}:
+        # DeepSeek V4.1 Flash is addressed as `deepseek-flash`; the retired
+        # deepseek-v4-* aliases still route to the same provider family.
+        # Explicitly disabling thinking preserves completion budget for the
+        # strict structured patch contract instead of returning reasoning only.
+        if (selected_model.lower().startswith("deepseek-v4") or selected_model.lower() == "deepseek-flash") \
+                and thinking_type in {"enabled", "disabled"}:
             request_payload["thinking"] = {"type": thinking_type}
         last_error: Exception | None = None
         data: dict[str, Any] = {}

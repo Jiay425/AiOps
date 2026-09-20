@@ -13,7 +13,7 @@ class Store:
         "diagnoses", "tasks", "alerts", "dispatches", "memories", "tool_logs", "notifications",
         "eval_cases", "eval_runs", "eval_metrics", "incident_states", "plans", "reviews", "audit_logs",
         "service_owners", "tool_policies", "approvals", "task_events",
-        "artifacts", "runtime_metrics",
+        "artifacts", "runtime_metrics", "outbox_events", "processed_events", "event_receipts",
     }
     def __init__(self, path: Path, mysql_url: str = "", mysql_username: str = "root", mysql_password: str = "",
                  mysql_pool_min_size: int = 1, mysql_pool_max_size: int = 10,
@@ -54,6 +54,40 @@ class Store:
                 (key, serialized, updated_at),
             )
             await db.commit()
+
+    async def put_many(self, records: list[tuple[str, str, dict[str, Any], str]]) -> None:
+        """Atomically persist related projections, including task state and Outbox rows."""
+        if not records:
+            return
+        for table, _, _, _ in records:
+            self._validate_table(table)
+        if self._pool:
+            async with self._pool.acquire() as connection, connection.cursor() as cursor:
+                await connection.begin()
+                try:
+                    for table, key, payload, updated_at in records:
+                        serialized = json.dumps(payload, ensure_ascii=False, default=str)
+                        await cursor.execute(
+                            f"INSERT INTO {table}(id,payload,updated_at) VALUES(%s,%s,%s) "
+                            "ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_at=VALUES(updated_at)",
+                            (key, serialized, updated_at))
+                    await connection.commit()
+                except Exception:
+                    await connection.rollback()
+                    raise
+            return
+        async with aiosqlite.connect(self.path) as db:
+            try:
+                for table, key, payload, updated_at in records:
+                    serialized = json.dumps(payload, ensure_ascii=False, default=str)
+                    await db.execute(
+                        f"INSERT INTO {table}(id,payload,updated_at) VALUES(?,?,?) "
+                        "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
+                        (key, serialized, updated_at))
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
 
     async def get(self, table: str, key: str) -> dict[str, Any] | None:
         self._validate_table(table)

@@ -37,6 +37,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+.venv311/
 *.egg-info/
 build/
 dist/
@@ -46,3 +47,4 @@ dist/
 .idea/
 *.iml
 .vscode/
+.env.full.local

@@ -9,7 +9,7 @@ from ops_autoagent import api
 from ops_autoagent.config import Settings
 from ops_autoagent.graphs import (CodeOpsGraph, IndependentReviewSubgraph, OpsEvidenceSubgraph,
                                   RepairProposalSubgraph, RepositoryInvestigationSubgraph,
-                                  VerificationSubgraph)
+                                  VerificationSubgraph, GraphRcaSubgraph)
 from ops_autoagent.codeops.orchestrator import IncidentFixOrchestratorPolicy
 from ops_autoagent.codeops.runtime import PatchProposal
 from ops_autoagent.llm import OpenAICompatibleClient
@@ -52,6 +52,62 @@ async def test_subgraphs_have_explicit_contracts_effect_boundaries_and_checkpoin
         assert result["artifact_refs"] and output["artifactRefs"]
         checkpoint = await subgraph.checkpoint(f"{cls.__name__}-thread")
         assert checkpoint.values["output"]["subgraph"] == output["subgraph"]
+
+
+@pytest.mark.asyncio
+async def test_ops_evidence_subgraph_writes_deterministic_anomalies_into_contract():
+    result = await OpsEvidenceSubgraph().ainvoke({
+        "taskId": "anomaly-subgraph", "serviceName": "order-service",
+        "evidenceBundle": {
+            "metrics": {"available": True, "anomalySeries": {"http_5xx_rate": [0.01, 0.01, 0.01, 0.01, 0.8]},
+                        "observations": ["ANOMALY: hikari_connections_pending latest=2"]},
+            "logs": {"available": True, "errorSamples": ["request timeout", "SQLException timeout", "connection refused"]},
+            "traces": {"available": True, "spans": ["POST /orders duration=1200ms timeout"]},
+            "signals": [],
+        },
+    }, thread_id="anomaly-subgraph-thread")
+    output = result["output"]
+    anomalies = output["deterministicAnomalies"]
+    assert anomalies and all(item["deterministic"] is True for item in anomalies)
+    assert {item["signalId"] for item in anomalies} <= {item["signalId"] for item in output["evidenceBundle"]["signals"]}
+
+
+@pytest.mark.asyncio
+async def test_codeops_attaches_ops_anomalies_to_working_memory_and_trace():
+    graph = CodeOpsGraph(OpenAICompatibleClient(Settings()))
+    anomaly = {"signalId": "deterministic-test", "deterministic": True, "detector": "RULE", "name": "error_rate"}
+    state = {"task": {"taskId": "anomaly-attach", "taskType": "INCIDENT_TO_FIX"}, "context": {},
+             "working_memory": {}, "repair_attempt": 0, "run_id": ""}
+    result = {"context": {}, "working_memory": {"opsEvidence": {"evidenceDetails": {"evidenceSignals": []}}},
+              "task": {"taskId": "anomaly-attach", "context": {}},
+              "steps": [{"selectedSkill": "ops_diagnosis", "rawEvidenceJson": "{}"}], "events": []}
+    attached = await graph._attach_subgraph(result, {"output": {"status": "SUFFICIENT", "subgraph": "ops_evidence",
+                                                                   "deterministicAnomalies": [anomaly]},
+                                                       "artifact_refs": [], "latency_ms": 0}, "ops_evidence", state)
+    memory = attached["working_memory"]["opsEvidence"]
+    assert memory["deterministicAnomalies"] == [anomaly]
+    assert attached["context"]["deterministicAnomalySignals"] == [anomaly]
+    assert "deterministic-test" in attached["steps"][0]["rawEvidenceJson"]
+
+
+@pytest.mark.asyncio
+async def test_graph_rca_subgraph_returns_only_topology_backed_candidates():
+    class Topology:
+        async def correlate(self, service_name, signals, spans):
+            assert service_name == "order-service"
+            assert signals[0]["name"] == "http_5xx_rate"
+            return {"status": "READY", "serviceName": service_name,
+                    "rootCauseCandidates": [{"service": "mysql-primary", "score": 0.9}],
+                    "dependencyPaths": [["order-service", "mysql-primary"]]}
+
+    result = await GraphRcaSubgraph(Topology()).ainvoke({
+        "taskId": "graph-rca", "serviceName": "order-service",
+        "evidenceBundle": {"signals": [{"name": "http_5xx_rate", "status": "ANOMALY"}],
+                           "traces": {"spans": ["mysql-primary timeout"]}},
+    }, thread_id="graph-rca-thread")
+    output = result["output"]
+    assert output["status"] == "READY"
+    assert output["rootCauseCandidates"][0]["service"] == "mysql-primary"
 
 
 @pytest.mark.asyncio

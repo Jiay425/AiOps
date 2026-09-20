@@ -204,6 +204,8 @@ class Settings(BaseSettings):
     codeops_scheduler_max_per_service: int = 1
     codeops_hitl_approval_enabled: bool = True
     codeops_apply_mode: str = "delivery_only"
+    codeops_auto_apply_enabled: bool = True
+    codeops_auto_apply_min_confidence: str = "HIGH"
     codeops_read_only_agent_tools: bool = True
     codeops_event_stream_enabled: bool = False
     codeops_max_repair_attempts: int = 3
@@ -216,6 +218,57 @@ class Settings(BaseSettings):
     codeops_runtime_metrics_enabled: bool = True
     codeops_runtime_evaluation_enabled: bool = True
     ops_parallel_evidence_enabled: bool = False
+    ops_deterministic_anomaly_enabled: bool = True
+    ops_anomaly_three_sigma_min_samples: int = 4
+    ops_anomaly_ewma_alpha: float = 0.3
+    ops_anomaly_max_signals: int = 24
+    ops_anomaly_isolation_forest_enabled: bool = True
+    ops_anomaly_isolation_forest_min_samples: int = 12
+    ops_anomaly_isolation_forest_contamination: float = 0.10
+    ops_anomaly_ensemble_min_votes: int = 2
+    ops_runtime_mode: str = "demo"
+    ops_topology_enabled: bool = True
+    neo4j_uri: str = ""
+    neo4j_username: str = "neo4j"
+    neo4j_password: str = ""
+    neo4j_database: str = "neo4j"
+    neo4j_max_connection_pool_size: int = 20
+    ops_topology_max_depth: int = 5
+    ops_topology_change_window_hours: int = 24
+    kafka_enabled: bool = False
+    kafka_bootstrap_servers: str = ""
+    kafka_client_id: str = "ops-autoagent"
+    kafka_consumer_group: str = "ops-autoagent-codeops"
+    kafka_topic_alerts: str = "aiops.alerts.v1"
+    kafka_topic_incidents: str = "aiops.incidents.v1"
+    kafka_topic_evidence: str = "aiops.evidence.v1"
+    kafka_topic_repair: str = "aiops.repair.v1"
+    kafka_topic_review: str = "aiops.review.v1"
+    kafka_topic_approval: str = "aiops.approval.v1"
+    kafka_topic_audit: str = "aiops.audit.v1"
+    kafka_topic_dlq: str = "aiops.dlq.v1"
+    kafka_outbox_poll_interval_ms: int = 500
+    kafka_outbox_batch_size: int = 50
+    kafka_outbox_max_attempts: int = 8
+    kafka_consumer_enabled: bool = True
+    kafka_consumer_poll_timeout_ms: int = 500
+    kafka_consumer_max_batch_size: int = 50
+    # Accepted Alertmanager events enter the durable Outbox first.  Disable
+    # only for local direct-debugging; production always uses the Kafka path.
+    kafka_alert_ingestion_enabled: bool = True
+    kafka_topic_auto_provision: bool = True
+    kafka_topic_partitions: int = 1
+    kafka_topic_replication_factor: int = 1
+    redis_url: str = ""
+    ops_otel_enabled: bool = False
+    ops_otel_service_name: str = "ops-autoagent"
+    ops_otel_exporter_otlp_endpoint: str = ""
+    ops_runbook_execution_enabled: bool = False
+    ops_runbook_server_dry_run_enabled: bool = True
+    ops_runbook_kubernetes_api_base: str = ""
+    ops_runbook_kubernetes_token: str = ""
+    ops_runbook_kubernetes_namespace: str = "default"
+    ops_runbook_action_allowlist: str = "restart_workload,scale_workload,rollback_release"
     langgraph_state_schema_version: int = 2
 
 

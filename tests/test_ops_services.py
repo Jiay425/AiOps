@@ -4,7 +4,7 @@ import sys
 import pytest
 
 from ops_autoagent.config import Settings
-from ops_autoagent.ops import (AlertDeduplicator, AlertNormalizer, EvidenceReviewer, EvidenceSignalExtractor,
+from ops_autoagent.ops import (AlertDeduplicator, AlertNormalizer, DeterministicAnomalyDetector, EnsembleAnomalyDetector, EvidenceReviewer, EvidenceSignalExtractor,
                                NotificationService, NotificationTemplateService, RunbookRagService,
                                OpsAgentSkillService, OpsChatClientResolver, SensitiveMasker, ServiceOwnerService)
 from ops_autoagent.llm import OpenAICompatibleClient
@@ -29,6 +29,39 @@ def test_sensitive_masker_and_evidence_review():
     assert review["status"] == "NEED_MORE_EVIDENCE"
     assert review["sufficient"] is False
     assert set(review["requiredTools"]) == {"query_skywalking_trace", "query_runbook"}
+
+
+def test_deterministic_anomaly_detector_emits_explainable_structured_signals():
+    signals = DeterministicAnomalyDetector().detect(
+        {"anomalySeries": {"http_5xx_rate": [0.01, 0.01, 0.01, 0.01, 0.80]},
+         "observations": ["ANOMALY: hikari_connections_pending latest=3"]},
+        {"errorSamples": ["request timeout while calling mysql", "SQLException: timeout", "connection refused"]},
+        {"spans": ["POST /orders duration=1500ms timeout"]},
+        {"serviceName": "order-service", "startTime": "2026-01-01T00:00:00Z", "endTime": "2026-01-01T00:05:00Z"},
+    )
+    detectors = {signal["detector"] for signal in signals}
+    assert {"THREE_SIGMA", "EWMA", "RULE", "LOG_PATTERN", "TRACE_PATTERN"} <= detectors
+    assert all(signal["deterministic"] is True and signal["signalId"].startswith("deterministic-") for signal in signals)
+    assert all(signal["entity"] == "order-service" and signal["baseline"] for signal in signals)
+
+
+def test_ensemble_anomaly_detector_uses_real_multivariate_isolation_forest():
+    # Fifteen stable observations establish a baseline; only the newest vector
+    # is jointly abnormal.  This is deliberately a multi-metric test rather
+    # than a mocked sklearn call.
+    normal_errors = [0.01 + (index % 3) * 0.001 for index in range(15)]
+    normal_latency = [120 + (index % 4) * 3 for index in range(15)]
+    signals = EnsembleAnomalyDetector(isolation_forest_min_samples=12, isolation_forest_contamination=0.10).detect(
+        {"anomalySeries": {
+            "http_5xx_rate": [*normal_errors, 0.92],
+            "http_p99_latency_ms": [*normal_latency, 5400],
+        }}, {}, {}, {"serviceName": "order-service"},
+    )
+    iforest = next(signal for signal in signals if signal["detector"] == "ISOLATION_FOREST")
+    assert iforest["baseline"]["algorithm"] == "sklearn.IsolationForest"
+    assert iforest["baseline"]["featureNames"] == ["http_5xx_rate", "http_p99_latency_ms"]
+    consensus = next(signal for signal in signals if signal["detector"] == "ENSEMBLE")
+    assert consensus["status"] == "ANOMALY"
 
 
 @pytest.mark.asyncio

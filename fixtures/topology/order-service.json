@@ -1,0 +1,19 @@
+{
+  "services": [
+    {"name": "order-service", "namespace": "demo", "tier": "application", "criticality": "high"},
+    {"name": "payment-service", "namespace": "demo", "tier": "application", "criticality": "high"},
+    {"name": "inventory-service", "namespace": "demo", "tier": "application", "criticality": "medium"}
+  ],
+  "databases": [
+    {"name": "mysql-primary", "namespace": "demo", "engine": "mysql", "criticality": "critical"}
+  ],
+  "dependencies": [
+    {"source": "order-service", "target": "payment-service", "properties": {"protocol": "http"}},
+    {"source": "order-service", "target": "inventory-service", "properties": {"protocol": "http"}},
+    {"source": "payment-service", "target": "mysql-primary", "targetKind": "database", "properties": {"protocol": "jdbc"}},
+    {"source": "inventory-service", "target": "mysql-primary", "targetKind": "database", "properties": {"protocol": "jdbc"}}
+  ],
+  "changes": [
+    {"changeId": "demo-order-idempotency-20260920", "service": "order-service", "type": "deployment", "source": "fixture", "description": "demo idempotency change"}
+  ]
+}
