@@ -21,7 +21,7 @@ request B ── alreadyProcessed(id) = false ─┘
 | Case | incident-order-idempotency-race |
 | 模型 | DeepSeek Flash，OpenAI-compatible API |
 | 工具调用 | 17 次 |
-| 总耗时 | 约 313 秒 |
+| 总耗时 | 约 73 秒 |
 | 修复范围 | IdempotencyService.java、OrderSubmitService.java |
 | 验证 | Scope Guard、静态安全、Maven 编译、IdempotencyServiceAtomicityTest 均通过 |
 | 审查结论 | ACCEPT_WITH_HUMAN_REVIEW |
