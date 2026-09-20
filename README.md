@@ -83,7 +83,7 @@ flowchart LR
 | 修改范围 | `IdempotencyService.java`、`OrderSubmitService.java` |
 | 验证 | Scope Guard、静态安全、Maven 编译、`IdempotencyServiceAtomicityTest` 均通过 |
 | 审查与执行 | `ACCEPT_WITH_HUMAN_REVIEW`；策略确认高置信且全部门禁通过后自动应用 |
-| 审计 | 17 次工具调用，约 313 秒；保存 Patch Digest、前后校验和、Effect Log |
+| 审计 | 17 次工具调用，约 73 秒；保存 Patch Digest、前后校验和、Effect Log |
 
 完整过程见 [订单幂等 Case Study](docs/incident-case-study.md)。
 
