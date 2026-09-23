@@ -10,7 +10,7 @@ import aiosqlite
 
 class Store:
     TABLES = {
-        "diagnoses", "tasks", "alerts", "dispatches", "memories", "tool_logs", "notifications",
+        "diagnoses", "tasks", "alerts", "alert_events", "alert_fingerprints", "incidents", "dispatches", "memories", "tool_logs", "notifications",
         "eval_cases", "eval_runs", "eval_metrics", "incident_states", "plans", "reviews", "audit_logs",
         "service_owners", "tool_policies", "approvals", "task_events",
         "artifacts", "runtime_metrics", "outbox_events", "processed_events", "event_receipts",

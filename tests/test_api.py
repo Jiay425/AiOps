@@ -419,43 +419,58 @@ async def test_alertmanager_empty_payload_and_message_match_legacy_contract():
         }]})
     assert empty.json() == {"code": "0002", "info": "alert webhook payload cannot be empty", "data": None}
     assert accepted.json()["data"] == {"totalAlerts": 1, "acceptedCount": 0, "skippedCount": 1,
-                                        "message": "alert webhook accepted"}
+                                        "message": "alerts persisted; accepted alerts are aggregating"}
 
 
 @pytest.mark.asyncio
-async def test_accepted_alert_is_atomically_staged_in_outbox_when_kafka_ingestion_is_enabled(monkeypatch):
-    monkeypatch.setattr(api_module, "_kafka_alert_ingestion_enabled", lambda: True)
+async def test_accepted_alert_is_persisted_and_aggregated_before_outbox():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/api/v1/ops/alert/webhook/alertmanager", json={"alerts": [{
-            "status": "firing", "fingerprint": "kafka-outbox-1",
+            "status": "firing", "fingerprint": "aggregation-only-1",
             "labels": {"alertname": "OrderErrorRate", "service": "orders", "severity": "critical"},
             "annotations": {"summary": "order failures exceed threshold"},
         }]})
     assert response.json()["data"]["acceptedCount"] == 1
-    outbox = await store.recent("outbox_events", 10)
-    assert len(outbox) == 1 and outbox[0]["status"] == "PENDING"
-    envelope = EventEnvelope.model_validate(outbox[0]["envelope"])
-    assert envelope.event_type == AIOpsEventType.ALERT
-    assert set(envelope.payload) == {"alert", "command", "dispatch"}
-    assert (await store.get("alerts", envelope.payload["alert"]["alertId"])) is not None
-    assert (await store.get("dispatches", envelope.payload["dispatch"]["dispatchId"])) is not None
+    incidents = await store.recent("incidents", 10)
+    assert len(incidents) == 1 and incidents[0]["status"] == "COLLECTING"
+    assert incidents[0]["alertCount"] == 1
+    assert len(await store.recent("alert_events", 10)) == 1
+    assert await store.recent("outbox_events", 10) == []
+    assert await store.recent("dispatches", 10) == []
 
 
 @pytest.mark.asyncio
-async def test_accepted_alert_routes_to_codeops_without_running_a_second_ops_parent_graph(monkeypatch):
-    calls: list[dict] = []
+async def test_duplicate_alert_updates_audit_without_creating_a_second_incident():
+    payload = {"alerts": [{
+        "status": "firing", "fingerprint": "duplicate-window-1",
+        "labels": {"alertname": "OrderErrorRate", "service": "orders", "severity": "critical"},
+        "annotations": {"summary": "order failures exceed threshold"},
+    }]}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload)
+        duplicate = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload)
+    assert first.json()["data"]["acceptedCount"] == 1
+    assert duplicate.json()["data"]["skippedCount"] == 1
+    events = await store.recent("alert_events", 10)
+    fingerprints = await store.recent("alert_fingerprints", 10)
+    assert len(await store.recent("incidents", 10)) == 1
+    assert any(event["ingressStatus"] == "DUPLICATE" for event in events)
+    assert fingerprints[0]["duplicateCount"] == 1
 
-    async def fake_trigger(alert, command, *, dispatch=None, retry_on_failure=False):
-        calls.append({"alert": alert, "command": command, "dispatch": dispatch,
-                      "retry": retry_on_failure})
 
-    monkeypatch.setattr(api_module, "_trigger_codeops_alert", fake_trigger)
-    dispatch = {"dispatchId": "dispatch-codeops-only", "eventId": "alert-codeops-only",
-                "dispatchStatus": "NEW", "updateTime": "2026-01-01T00:00:00"}
-    await api_module._run_accepted_alert(
-        {"alertId": "alert-codeops-only", "serviceName": "orders"}, dispatch,
-        {"serviceName": "orders", "diagnosisId": "diag-codeops-only"}, retry_on_failure=True)
-    assert len(calls) == 1 and calls[0]["retry"] is True
-    persisted = await store.get("dispatches", "dispatch-codeops-only")
-    assert persisted["dispatchStatus"] == "RUNNING"
-    assert persisted["routedTo"] == "CodeOpsGraph.ops_diagnosis"
+@pytest.mark.asyncio
+async def test_kafka_incident_consumer_persists_queue_state_before_scheduler_handoff(monkeypatch):
+    received: list[dict] = []
+
+    class Scheduler:
+        async def enqueue(self, incident):
+            received.append(incident)
+
+    monkeypatch.setattr(api_module, "incident_scheduler", Scheduler())
+    envelope = EventEnvelope(eventType=AIOpsEventType.INCIDENT, incidentId="incident-consumer-1",
+                             idempotencyKey="incident-ready:incident-consumer-1",
+                             payload={"incident": {"incidentId": "incident-consumer-1", "status": "READY"}})
+    await api_module._consume_incident_event(envelope)
+    persisted = await store.get("incidents", "incident-consumer-1")
+    assert persisted["status"] == "QUEUED"
+    assert received[0]["scheduledBy"] == "KafkaIncidentConsumer"

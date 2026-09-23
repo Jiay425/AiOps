@@ -35,11 +35,12 @@ from .persistence import CheckpointerManager
 from .executors import CallerRunsBoundedExecutor
 from .eventing import AIOpsEventType, EventEnvelope, KafkaConsumerWorker, KafkaPublisher
 from .outbox import OutboxRelay
+from .incident_aggregation import IncidentAggregationCoordinator
 from .tools import ObservabilityTools
 from .topology import Neo4jTopologyService, TopologyUnavailable
 from .runbook_actions import RunbookActionRequest, RunbookActionService
 from .telemetry import configure_telemetry, shutdown_telemetry
-from .ops import (AlertDeduplicator, AlertNormalizer, NotificationService, NotificationTemplateService,
+from .ops import (AlertNormalizer, NotificationService, NotificationTemplateService,
                   OpsDemoDataAutoSeeder, RunbookRagService, SensitiveMasker, ServiceOwnerService)
 from .codeops import AgentLoopService, CodeOpsSecurityGovernance, EngineeringToolGateway, IncidentScheduler
 from .codeops.evaluation import (EVALUATION_SCORING_SCHEMA_VERSION, build_case_report, build_report,
@@ -62,7 +63,7 @@ outbox_relay = OutboxRelay(store, event_publisher, settings)
 event_consumer: KafkaConsumerWorker | None = None
 evaluation_state: dict[str, Any] = {"lastReport": None, "schedulerRunning": False}
 alert_normalizer = AlertNormalizer()
-alert_deduplicator = AlertDeduplicator(store, settings.ops_alert_dedup_window_minutes)
+incident_aggregator = IncidentAggregationCoordinator(store, settings)
 runbook_rag = RunbookRagService(settings)
 runbook_actions = RunbookActionService(settings)
 background_jobs: set[asyncio.Task] = set()
@@ -86,11 +87,10 @@ api_guard_masker = SensitiveMasker()
 async def _record_consumed_kafka_event(envelope: EventEnvelope) -> None:
     """Apply a durable Kafka event before its offset is committed.
 
-    Alerts are the only externally-triggered command in this service.  They are
-    persisted to the Outbox by the webhook and are deliberately *started here*,
-    not by the HTTP request.  ``KafkaConsumerWorker`` records the idempotency
-    key only after this function returns, so a failed diagnosis/repair remains
-    eligible for Kafka redelivery instead of being silently acknowledged.
+    An aggregated Incident is the only externally-triggered repair command.
+    The webhook never starts a graph: it persists raw alerts and waits for the
+    aggregation coordinator to write the Incident Outbox event. The consumer
+    records its idempotency key only after scheduler hand-off succeeds.
     """
     payload = redact(envelope.payload)
     receipt = {"receiptId": envelope.idempotency_key, "eventId": envelope.event_id,
@@ -98,27 +98,21 @@ async def _record_consumed_kafka_event(envelope: EventEnvelope) -> None:
                "correlationId": envelope.correlation_id, "payload": payload,
                "receivedAt": now_iso()}
     await store.put("event_receipts", envelope.idempotency_key, receipt, receipt["receivedAt"])
-    if envelope.event_type == AIOpsEventType.ALERT:
-        await _consume_alert_event(envelope)
+    if envelope.event_type == AIOpsEventType.INCIDENT:
+        await _consume_incident_event(envelope)
 
 
-def _kafka_alert_ingestion_enabled() -> bool:
-    """Whether Alertmanager hands off accepted alerts through the durable Outbox."""
-    return event_publisher.configured and bool(getattr(settings, "kafka_alert_ingestion_enabled", True))
-
-
-async def _consume_alert_event(envelope: EventEnvelope) -> None:
-    """Run the existing incident and CodeOps flows from a validated alert event."""
-    payload = envelope.payload
-    alert, command, dispatch = payload.get("alert"), payload.get("command"), payload.get("dispatch")
-    if not all(isinstance(value, dict) for value in (alert, command, dispatch)):
-        raise ValueError("Kafka alert event requires alert, command and dispatch objects")
-    if str(dispatch.get("eventId")) != str(alert.get("alertId")):
-        raise ValueError("Kafka alert dispatch does not match alert id")
-    # Persisted dispatch status makes the work visible to operators before any
-    # potentially slow LLM/tool call begins.  The consumer commits only after
-    # both branches return, retaining Kafka's at-least-once retry semantics.
-    await _run_accepted_alert(dict(alert), dict(dispatch), dict(command), retry_on_failure=True)
+async def _consume_incident_event(envelope: EventEnvelope) -> None:
+    """The only production hand-off into scheduling after aggregation."""
+    incident = envelope.payload.get("incident")
+    if not isinstance(incident, dict) or not str(incident.get("incidentId") or "").strip():
+        raise ValueError("Kafka incident event requires an incident object with incidentId")
+    if incident_scheduler is None:
+        raise RuntimeError("IncidentScheduler is not running")
+    queued = {**incident, "status": "QUEUED", "scheduledBy": "KafkaIncidentConsumer",
+              "queuedAt": now_iso(), "updateTime": now_iso()}
+    await store.put("incidents", str(queued["incidentId"]), queued, queued["updateTime"])
+    await incident_scheduler.enqueue(queued)
 
 
 @asynccontextmanager
@@ -128,6 +122,7 @@ async def lifespan(_: FastAPI):
     asyncio.get_running_loop().set_default_executor(bounded_executor)
     await store.initialize()
     production_mode = str(settings.ops_runtime_mode).strip().lower() == "production"
+    await incident_aggregator.start(required=production_mode)
     await topology_service.start(required=production_mode and settings.ops_topology_enabled)
     await event_publisher.start(required=production_mode)
     await outbox_relay.start()
@@ -163,6 +158,7 @@ async def lifespan(_: FastAPI):
         if background_jobs:
             await asyncio.gather(*tuple(background_jobs), return_exceptions=True)
         background_jobs.clear()
+        await incident_aggregator.close()
         await outbox_relay.stop()
         if event_consumer is not None:
             await event_consumer.stop()
@@ -436,96 +432,77 @@ async def alertmanager(body: AlertmanagerWebhook) -> ApiResponse:
         return fail("alert webhook payload cannot be empty", "0002")
     alerts = alert_normalizer.normalize(body)
     accepted, skipped = 0, len(body.alerts) - len(alerts)
-    for alert, raw_alert in zip(alerts, body.alerts, strict=True):
-        decision = await alert_deduplicator.accept(alert)
-        if decision["accepted"]:
-            accepted += 1
-            alert["dedupKey"] = decision["dedupKey"]
-            command = _alert_incident_command(alert)
-            created = now_iso()
-            dispatch = {"dispatchId": f"dispatch-{uuid.uuid4()}", "eventId": alert["alertId"],
-                        "diagnosisId": command["diagnosisId"], "serviceName": alert["serviceName"],
-                        "dedupKey": decision["dedupKey"], "dispatchStatus": "NEW",
-                        "createTime": created, "updateTime": created}
-            # The request owns only validation, de-duplication and durable
-            # acceptance.  When Kafka is configured, the consumer owns the
-            # actual LangGraph execution after the Outbox has confirmed a
-            # broker delivery.  This keeps an Alertmanager retry from creating
-            # a second diagnosis while the first request is still in flight.
-            if _kafka_alert_ingestion_enabled():
-                event_alert = {**alert, "rawPayload": "[REDACTED_RAW_ALERT_PAYLOAD]"}
-                envelope = EventEnvelope(
-                    eventId=f"evt-alert-{alert['alertId']}", eventType=AIOpsEventType.ALERT,
-                    incidentId=command["diagnosisId"], correlationId=dispatch["dispatchId"],
-                    idempotencyKey=f"alert:{alert['alertId']}:{decision['dedupKey']}",
-                    payload={"alert": redact(event_alert), "command": redact(command), "dispatch": redact(dispatch)},
-                )
-                outbox = OutboxRelay.pending_record(envelope)
-                await store.put_many([
-                    ("alerts", alert["alertId"], redact(alert), created),
-                    ("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"]),
-                    ("outbox_events", outbox["outboxId"], outbox, outbox["updateTime"]),
-                ])
-            else:
-                await store.put_many([
-                    ("alerts", alert["alertId"], redact(alert), created),
-                    ("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"]),
-                ])
-                job = asyncio.create_task(_run_accepted_alert(alert, dispatch, command))
-                background_jobs.add(job)
-                job.add_done_callback(background_jobs.discard)
-        else:
+    for alert in alerts:
+        created = now_iso()
+        raw = {**alert, "ingressStatus": "RECEIVED", "duplicate": False,
+               "createTime": created, "updateTime": created}
+        # Persist every webhook event before Redis.  A duplicate is still an
+        # auditable Alertmanager delivery, it is simply not a new task trigger.
+        await store.put("alert_events", alert["alertId"], redact(raw), created)
+        if str(alert.get("status") or "").lower() != "firing":
             skipped += 1
-            dispatch = {"dispatchId": f"dispatch-{uuid.uuid4()}", "eventId": alert["alertId"],
-                        "serviceName": alert["serviceName"], "dedupKey": decision["dedupKey"],
-                        "dispatchStatus": "SKIPPED", "skipReason": decision["reason"],
-                        "createTime": now_iso(), "endTime": now_iso(), "updateTime": now_iso()}
+            raw.update(ingressStatus="IGNORED", ignoreReason="alert status is not firing", updateTime=now_iso())
+            await store.put("alert_events", alert["alertId"], redact(raw), raw["updateTime"])
+            continue
+        fingerprint_id = "fingerprint-" + incident_aggregator.fingerprint_key(alert).rsplit(":", 1)[-1]
+        if not await incident_aggregator.claim_fingerprint(alert):
+            skipped += 1
+            raw.update(ingressStatus="DUPLICATE", duplicate=True,
+                       duplicateReason=f"fingerprint seen within {settings.ops_alert_dedup_window_minutes} minutes",
+                       updateTime=now_iso())
+            fingerprint = await store.get("alert_fingerprints", fingerprint_id) or {
+                "fingerprintKey": fingerprint_id, "firstSeen": created, "duplicateCount": 0}
+            fingerprint.update(lastSeen=raw["updateTime"],
+                               duplicateCount=int(fingerprint.get("duplicateCount", 0)) + 1,
+                               updateTime=raw["updateTime"])
             await store.put_many([
-                ("alerts", alert["alertId"], redact(alert), dispatch["updateTime"]),
-                ("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"]),
+                ("alert_events", alert["alertId"], redact(raw), raw["updateTime"]),
+                ("alert_fingerprints", fingerprint_id, fingerprint, raw["updateTime"]),
             ])
-        raw_labels, raw_annotations = raw_alert.labels or {}, raw_alert.annotations or {}
-        if incident_scheduler and raw_alert.fingerprint is not None:
-            await incident_scheduler.ingest(
-                raw_alert.fingerprint, raw_labels.get("alertname", "unknown"),
-                raw_labels.get("service", "unknown"), raw_labels.get("severity", "warning"),
-                raw_annotations.get("summary", raw_annotations.get("description", "")),
-                raw_labels.get("endpoint", ""))
+            continue
+
+        try:
+            aggregate = await incident_aggregator.aggregate(alert, f"incident-{uuid.uuid4()}")
+            persisted = await store.get("incidents", aggregate["incidentId"])
+            labels = alert.get("labels") if isinstance(alert.get("labels"), dict) else {}
+            annotations = alert.get("annotations") if isinstance(alert.get("annotations"), dict) else {}
+            repository = (labels.get("repository") or labels.get("repo") or labels.get("code_repository")
+                          or annotations.get("repository") or annotations.get("repo")
+                          or annotations.get("code_repository") or "")
+            # An already-ready/queued/running incident is the same incident
+            # within its correlation window. Keep its audit aggregate current,
+            # but never reopen it or create another Incident-to-Fix task.
+            existing_status = str((persisted or {}).get("status") or "")
+            can_schedule = not persisted or existing_status == "COLLECTING"
+            incident = {**(persisted or {}), **{key: value for key, value in aggregate.items() if key != "isNew"},
+                        "incidentId": aggregate["incidentId"], "serviceName": alert["serviceName"],
+                        "alertName": alert["alertName"], "environment": labels.get("environment") or labels.get("env")
+                        or labels.get("namespace") or "default", "repository": repository,
+                        "status": "COLLECTING" if can_schedule else existing_status, "source": "alertmanager",
+                        "createTime": (persisted or {}).get("createTime", created), "updateTime": now_iso()}
+            fingerprint = await store.get("alert_fingerprints", fingerprint_id) or {
+                "fingerprintKey": fingerprint_id, "firstSeen": created, "acceptedCount": 0, "duplicateCount": 0}
+            fingerprint.update(lastSeen=incident["updateTime"],
+                               acceptedCount=int(fingerprint.get("acceptedCount", 0)) + 1,
+                               incidentId=incident["incidentId"], updateTime=incident["updateTime"])
+            raw.update(ingressStatus="AGGREGATED" if can_schedule else "AGGREGATED_EXISTING", incidentId=incident["incidentId"],
+                       incidentKey=aggregate["incidentKey"], updateTime=incident["updateTime"])
+            await store.put_many([
+                ("alert_events", alert["alertId"], redact(raw), raw["updateTime"]),
+                ("alert_fingerprints", fingerprint_id, fingerprint, raw["updateTime"]),
+                ("incidents", incident["incidentId"], incident, incident["updateTime"]),
+            ])
+            accepted += 1
+        except Exception:
+            await incident_aggregator.release_fingerprint(alert)
+            raise
     return ok({"totalAlerts": len(body.alerts), "acceptedCount": accepted,
-               "skippedCount": skipped, "message": "alert webhook accepted"})
+               "skippedCount": skipped, "message": "alerts persisted; accepted alerts are aggregating"})
 
 
 @app.post("/api/v1/ops/alert/webhook/alertmanager/incident-to-fix/verify")
 async def verify_alert_to_fix(body: AlertmanagerWebhook) -> ApiResponse:
-    if not body.alerts:
-        return fail("alert webhook payload cannot be empty", "0002")
-    alerts = alert_normalizer.normalize(body)
-    if not alerts:
-        return fail("no firing alert found in payload", "0002")
-    if not settings.codeops_incident_to_fix_alert_enabled:
-        return fail("Incident-to-Fix alert trigger is disabled")
-    alert = alerts[0]
-    labels, annotations = alert.get("labels", {}), alert.get("annotations", {})
-    repository = (labels.get("repository") or labels.get("repo") or labels.get("code_repository")
-                  or annotations.get("repository") or annotations.get("repo")
-                  or annotations.get("code_repository") or "")
-    goal = (f"{alert['serviceName']} 触发线上告警 [{alert['alertName']}]，问题描述：{alert['summary']}。"
-            "请完成 Incident-to-Fix：诊断线上证据，抽取异常类名/接口路径/可疑 Service，定位代码，"
-            "生成修复补丁草稿、测试验证建议和发布风险观察项。")
-    request = CodeOpsTaskRequest(
-        taskType="INCIDENT_TO_FIX", goal=goal, repository=repository,
-        focusAreas=["incident", "code_location", "knowledge_rag", "bug_fix", "test_verification", "release_risk"],
-        context={**alert, "source": "alertmanager", "evidenceMode": "LIVE",
-                 "fixtureFallbackAllowed": False, "allowPatchApply": str(labels.get(
-                     "codeops.allowPatchApply", annotations.get("codeops.allowPatchApply", "true"))).lower() == "true",
-                 "allowTestPatchApply": str(labels.get(
-                     "codeops.allowTestPatchApply", annotations.get("codeops.allowTestPatchApply", "true"))).lower() == "true",
-                 "alertmanagerPayload": alert.get("rawPayload"), "alertLabels": labels,
-                 "alertAnnotations": annotations}, maxRounds=8, maxToolCalls=50)
-    state = await codeops_graph.invoke(request)
-    task = state["task"]
-    await store.put("tasks", task["taskId"], task, task["updateTime"])
-    return ApiResponse(info="real alertmanager incident-to-fix chain executed", data=_incident_fix_view(task))
+    return await alertmanager(body)
 
 
 @app.post("/api/v1/ops/verify/full-chain")
@@ -2139,117 +2116,39 @@ async def _dispatch_scheduled_incident(incident: dict[str, Any]) -> None:
     endpoints = incident.get("affectedEndpoints") if isinstance(incident.get("affectedEndpoints"), list) else []
     endpoint_suffix = f" Affected endpoints: {', '.join(str(item) for item in endpoints)}" if endpoints else ""
     service = incident.get("service") or incident.get("serviceName") or "unknown-service"
+    incident_id = str(incident.get("incidentId") or "")
+    running = {**incident, "status": "RUNNING", "startedAt": now_iso(), "updateTime": now_iso()}
+    if incident_id:
+        await store.put("incidents", incident_id, running, running["updateTime"])
     request = CodeOpsTaskRequest(
         taskType="INCIDENT_TO_FIX",
         goal=(f"{service} {incident.get('alertName', 'unknown')} "
               f"severity={incident.get('severity', 'UNKNOWN')}. Aggregated from {incident.get('alertCount', 0)} "
               f"alerts. {incident.get('summary', '')}{endpoint_suffix}"),
-        repository="samples/order-service",
+        repository=incident.get("repository") or "samples/order-service",
         focusAreas=["incident", "code_location", "bug_fix", "test_verification", "release_risk"],
         context={"serviceName": service,
                  "severity": incident.get("severity", "UNKNOWN"), "alertCount": incident.get("alertCount", 0),
                  "alertName": incident.get("alertName", "unknown"), "affectedEndpoints": endpoints,
-                 "scheduledBy": "IncidentScheduler", "evidenceMode": "LIVE",
+                 "scheduledBy": "IncidentScheduler", "incidentId": incident.get("incidentId"),
+                 "incidentKey": incident.get("incidentKey"), "fingerprints": incident.get("fingerprints", []),
+                 "instances": incident.get("instances", []), "evidenceMode": "LIVE",
                  "fixtureFallbackAllowed": False, "allowPatchApply": True, "allowTestPatchApply": True},
         maxRounds=8, maxToolCalls=50)
-    state = await codeops_graph.invoke(request)
-    task = state["task"]
-    await store.put("tasks", task["taskId"], task, task["updateTime"])
-
-
-def _alert_incident_command(alert: dict[str, Any]) -> dict[str, Any]:
-    now = datetime.now()
     try:
-        incident_start = datetime.fromisoformat(str(alert.get("startsAt") or ""))
-    except ValueError:
-        incident_start = now - timedelta(minutes=10)
-    start = incident_start - timedelta(minutes=10)
-    try:
-        alert_end = datetime.fromisoformat(str(alert.get("endsAt") or ""))
-    except ValueError:
-        alert_end = now
-    end = alert_end if alert_end >= start else now
-    service = str(alert.get("serviceName") or "unknown-service").strip() or "unknown-service"
-    rule = str(alert.get("alertRule") or "UNKNOWN_ALERT").strip() or "UNKNOWN_ALERT"
-    severity = str(alert.get("severity") or "P2").strip() or "P2"
-    return {"serviceName": service, "startTime": start.strftime("%Y-%m-%d %H:%M:%S"),
-            "endTime": end.strftime("%Y-%m-%d %H:%M:%S"),
-            "problem": (f"{service} 在最近 10 分钟触发告警 [{rule}]，严重级别 {severity}。请分析 Prometheus 指标、"
-                        "ELK 日志、SkyWalking 链路与运维 Runbook，判断根因候选，并给出临时止血和长期优化建议。"),
-            "traceId": alert.get("traceId"), "endpoint": alert.get("endpoint", ""),
-            "maxStep": max(1, settings.ops_alert_max_step), "sessionId": str(uuid.uuid4()),
-            "diagnosisId": f"diag-{uuid.uuid4()}"}
-
-
-async def _run_accepted_alert(alert: dict[str, Any], dispatch: dict[str, Any], command: dict[str, Any], *,
-                              retry_on_failure: bool = False) -> None:
-    """Hand an accepted alert to the single production CodeOpsGraph.
-
-    ``OpsDiagnosisGraph`` remains only behind its legacy direct-diagnosis API
-    for migration compatibility. Alertmanager and Kafka must not run it as a
-    second parent graph: CodeOpsGraph's ``ops_diagnosis`` stage is the one
-    Diagnosis Agent in the production Incident-to-Fix path.
-    """
-    dispatch.update(dispatchStatus="RUNNING", startTime=dispatch.get("startTime") or now_iso(),
-                    routedTo="CodeOpsGraph.ops_diagnosis", updateTime=now_iso())
-    await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
-    await _trigger_codeops_alert(alert, command, dispatch=dispatch, retry_on_failure=retry_on_failure)
-
-
-async def _trigger_codeops_alert(alert: dict[str, Any], command: dict[str, Any], *,
-                                 dispatch: dict[str, Any] | None = None,
-                                 retry_on_failure: bool = False) -> None:
-    if not settings.codeops_incident_to_fix_alert_enabled:
-        if dispatch is not None:
-            dispatch.update(dispatchStatus="SKIPPED", codeopsDispatchStatus="SKIPPED",
-                            codeopsSkipReason="incident-to-fix disabled", endTime=now_iso(), updateTime=now_iso())
-            await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
-        return
-    if dispatch is not None:
-        existing = await store.get("dispatches", str(dispatch["dispatchId"]))
-        if existing and existing.get("codeopsDispatchStatus") == "SUCCESS":
-            return
-        dispatch = {**(existing or dispatch), "codeopsDispatchStatus": "RUNNING", "updateTime": now_iso()}
-        await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
-    labels, annotations = alert.get("labels", {}), alert.get("annotations", {})
-    repository = (labels.get("repository") or labels.get("repo") or labels.get("code_repository")
-                  or annotations.get("repository") or annotations.get("repo")
-                  or annotations.get("code_repository"))
-    def flag(key: str) -> bool:
-        return str(labels.get(key, annotations.get(key, "true"))).lower() == "true"
-    request = CodeOpsTaskRequest(
-        taskType="INCIDENT_TO_FIX",
-        goal=(f"{command['serviceName']} 触发线上告警 [{alert['alertRule']}]，问题描述：{command['problem']}。"
-              "请完成 Incident-to-Fix：诊断线上证据，抽取异常类名/接口路径/可疑 Service，定位代码，"
-              "生成修复补丁草稿、测试验证建议和发布风险观察项。"),
-        repository=repository,
-        focusAreas=["incident", "code_location", "knowledge_rag", "bug_fix", "test_verification", "release_risk"],
-        context={"source": "alertmanager", "evidenceMode": "LIVE", "fixtureFallbackAllowed": False,
-                 "eventId": alert["alertId"], "alertRule": alert["alertRule"], "severity": alert["severity"],
-                 "fingerprint": alert.get("fingerprint"), "serviceName": command["serviceName"],
-                 "startTime": command["startTime"], "endTime": command["endTime"],
-                 "traceId": command.get("traceId"), "endpoint": command.get("endpoint") or labels.get("endpoint"),
-                 "opsDiagnosisId": command["diagnosisId"], "repository": repository,
-                 "allowPatchApply": flag("codeops.allowPatchApply"),
-                 "allowTestPatchApply": flag("codeops.allowTestPatchApply"),
-                 "alertmanagerPayload": alert.get("rawPayload"),
-                 "alertLabels": labels, "alertAnnotations": annotations},
-        maxRounds=8, maxToolCalls=50)
-    try:
-        result = await codeops_graph.invoke(request)
-        task = result["task"]
+        state = await codeops_graph.invoke(request)
+        task = state["task"]
         await store.put("tasks", task["taskId"], task, task["updateTime"])
-        if dispatch is not None:
-            dispatch.update(dispatchStatus="SUCCESS", codeopsDispatchStatus="SUCCESS", codeopsTaskId=task["taskId"],
-                            codeopsEndTime=now_iso(), endTime=now_iso(), updateTime=now_iso())
-            await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
+        if incident_id:
+            completed = {**running, "status": str(task.get("status") or "COMPLETED"),
+                         "taskId": task["taskId"], "completedAt": now_iso(), "updateTime": now_iso()}
+            await store.put("incidents", incident_id, completed, completed["updateTime"])
     except Exception as exc:
-        if dispatch is not None:
-            dispatch.update(dispatchStatus="FAILED", codeopsDispatchStatus="FAILED", codeopsError=type(exc).__name__,
-                            codeopsEndTime=now_iso(), endTime=now_iso(), updateTime=now_iso())
-            await store.put("dispatches", dispatch["dispatchId"], dispatch, dispatch["updateTime"])
-        if retry_on_failure:
-            raise
+        if incident_id:
+            failed = {**running, "status": "FAILED", "failureType": type(exc).__name__,
+                      "updateTime": now_iso()}
+            await store.put("incidents", incident_id, failed, failed["updateTime"])
+        raise
 
 
 async def _notify_diagnosis(alert: dict[str, Any], diagnosis: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:

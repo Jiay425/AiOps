@@ -51,24 +51,29 @@ The model can propose diagnoses and patches; it cannot write a repository direct
 
 ```mermaid
 flowchart LR
-    A[Alert / Issue] --> B[FastAPI / Kafka]
-    B --> C[CodeOpsGraph]
-    C --> D[Diagnosis Agent]
-    D --> E[OpsEvidenceSubgraph]
-    E --> F[3-Sigma · EWMA · Rules · Isolation Forest]
-    D --> G[GraphRcaSubgraph]
-    G --> H[Neo4j topology · change · trace]
-    C --> I[Repair Agent]
-    I --> J[Repository investigation]
-    J --> K[PatchSandbox]
-    K --> L[Maven compile / test]
-    L --> M[Review Agent]
-    M -->|high confidence + gates passed| N[auto_approve_patch]
-    M -->|low confidence / high risk| O[interrupt / resume]
-    N --> P[apply_approved_patch]
-    O --> P
-    C -. checkpoint .-> Q[(SQLite / PostgreSQL)]
-    C -. event / artifact / metric .-> R[(MySQL / Kafka)]
+    A[Alertmanager Webhook] --> B[MySQL Alert Event]
+    B --> C[Redis fingerprint dedup]
+    C --> D[Redis Incident aggregation]
+    D --> E[MySQL Incident + Outbox]
+    E --> F[Kafka Incident Consumer]
+    F --> G[IncidentScheduler]
+    G --> H[CodeOpsGraph]
+    H --> I[Diagnosis Agent]
+    I --> J[OpsEvidenceSubgraph]
+    J --> K[3-Sigma · EWMA · Rules · Isolation Forest]
+    K --> L[GraphRcaSubgraph]
+    L --> M[Neo4j topology · change · trace]
+    H --> N[Repair Agent]
+    N --> O[Repository investigation]
+    O --> P[PatchSandbox]
+    P --> Q[Maven compile / test]
+    Q --> R[Review Agent]
+    R -->|high confidence + gates passed| S[auto_approve_patch]
+    R -->|low confidence / high risk| T[interrupt / resume]
+    S --> U[apply_approved_patch]
+    T --> U
+    H -. checkpoint .-> V[(SQLite / PostgreSQL)]
+    H -. event / artifact / metric .-> W[(MySQL / Kafka)]
 ```
 
 ## A real end-to-end case
@@ -219,16 +224,22 @@ paths and sources. If graph data is unavailable, it reports NOT_CONFIGURED or UN
 ### Kafka, Outbox, and DLQ
 
 ~~~text
-Alert webhook
-  → MySQL: Alert + Dispatch + Outbox (one transaction)
-  → Kafka: aiops.alerts.v1 / aiops.events.v1
-  → idempotent consumer
-  → CodeOpsGraph
-  → failure → aiops.dlq.v1
+Alertmanager Webhook
+  → persist each alert in MySQL alert_events
+  → Redis SET NX EX 600 fingerprint deduplication
+  → duplicate: update last_seen / duplicate_count, then stop
+  → accepted alert: aggregate by environment + service + alertname + endpoint
+  → Redis HSET: alertCount, lastSeen, highest severity, fingerprint / instance sets
+  → first Incident: MySQL incidents (COLLECTING), wait 30–60 seconds
+  → window expiry: MySQL incidents (READY) + Outbox (one transaction)
+  → Kafka: aiops.incidents.v1 → idempotent Consumer → IncidentScheduler → one CodeOpsGraph
+  → consumer failure → aiops.dlq.v1
 ~~~
 
-- An Outbox item becomes PUBLISHED only after a Kafka acknowledgement.
-- Every envelope has a version and idempotencyKey; duplicate delivery does not start duplicate repair.
+- Every Alertmanager delivery is persisted first; the same fingerprint only increments duplicate_count within ten minutes and never creates another task.
+- The Incident Key excludes instance and fingerprint, so alerts from multiple instances of the same environment, service, alert name, and endpoint merge into one repair.
+- An Outbox item is created only when aggregation closes, and becomes PUBLISHED only after a Kafka acknowledgement.
+- Every Incident envelope has a version and idempotencyKey; duplicate delivery does not start duplicate repair.
 - Invalid or exhausted messages retain their envelope and error class in the DLQ.
 
 ## Automatic repair policy and safety boundaries

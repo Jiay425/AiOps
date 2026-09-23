@@ -4,11 +4,11 @@ import sys
 import pytest
 
 from ops_autoagent.config import Settings
-from ops_autoagent.ops import (AlertDeduplicator, AlertNormalizer, DeterministicAnomalyDetector, EnsembleAnomalyDetector, EvidenceReviewer, EvidenceSignalExtractor,
+from ops_autoagent.ops import (AlertNormalizer, DeterministicAnomalyDetector, EnsembleAnomalyDetector, EvidenceReviewer, EvidenceSignalExtractor,
                                NotificationService, NotificationTemplateService, RunbookRagService,
                                OpsAgentSkillService, OpsChatClientResolver, SensitiveMasker, ServiceOwnerService)
 from ops_autoagent.llm import OpenAICompatibleClient
-from ops_autoagent.schemas import AlertmanagerWebhook, now_iso
+from ops_autoagent.schemas import AlertmanagerWebhook
 from ops_autoagent.store import Store
 from ops_autoagent.tools import McpStdioClient
 
@@ -65,9 +65,7 @@ def test_ensemble_anomaly_detector_uses_real_multivariate_isolation_forest():
 
 
 @pytest.mark.asyncio
-async def test_alert_normalization_and_dedup(tmp_path: Path):
-    store = Store(tmp_path / "ops.db")
-    await store.initialize()
+async def test_alert_normalization_preserves_fingerprint_for_redis_dedup():
     webhook = AlertmanagerWebhook.model_validate({
         "status": "firing",
         "alerts": [{"status": "firing", "fingerprint": "same", "labels": {
@@ -76,14 +74,8 @@ async def test_alert_normalization_and_dedup(tmp_path: Path):
     })
     alert = AlertNormalizer().normalize(webhook)[0]
     assert alert["severity"] == "P1"
-    dedup = AlertDeduplicator(store, 5)
-    first = await dedup.accept(alert)
-    assert first["accepted"]
-    await store.put("dispatches", "dispatch-1", {"dispatchId": "dispatch-1", "serviceName": "order-service",
-                    "dedupKey": first["dedupKey"], "dispatchStatus": "COMPLETED",
-                    "createTime": now_iso(), "updateTime": now_iso()}, now_iso())
-    duplicate = AlertNormalizer().normalize(webhook)[0]
-    assert not (await dedup.accept(duplicate))["accepted"]
+    assert alert["fingerprint"] == "same"
+    assert alert["status"] == "firing"
 
 
 @pytest.mark.asyncio

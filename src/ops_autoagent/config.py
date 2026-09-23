@@ -50,7 +50,8 @@ class Settings(BaseSettings):
     ops_rate_limit_enabled: bool = True
     ops_rate_limit_max_requests: int = 20
     ops_rate_limit_window_seconds: int = 60
-    ops_alert_dedup_window_minutes: int = 5
+    ops_alert_dedup_window_minutes: int = 10
+    ops_incident_aggregation_window_seconds: int = 60
     ops_alert_max_step: int = 9
     ops_agent_enabled: bool = True
     ops_agent_max_rounds: int = 2
@@ -239,7 +240,6 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = ""
     kafka_client_id: str = "ops-autoagent"
     kafka_consumer_group: str = "ops-autoagent-codeops"
-    kafka_topic_alerts: str = "aiops.alerts.v1"
     kafka_topic_incidents: str = "aiops.incidents.v1"
     kafka_topic_evidence: str = "aiops.evidence.v1"
     kafka_topic_repair: str = "aiops.repair.v1"
@@ -253,9 +253,6 @@ class Settings(BaseSettings):
     kafka_consumer_enabled: bool = True
     kafka_consumer_poll_timeout_ms: int = 500
     kafka_consumer_max_batch_size: int = 50
-    # Accepted Alertmanager events enter the durable Outbox first.  Disable
-    # only for local direct-debugging; production always uses the Kafka path.
-    kafka_alert_ingestion_enabled: bool = True
     kafka_topic_auto_provision: bool = True
     kafka_topic_partitions: int = 1
     kafka_topic_replication_factor: int = 1

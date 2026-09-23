@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 class AIOpsEventType(StrEnum):
-    ALERT = "aiops.alert"
     INCIDENT = "aiops.incident"
     EVIDENCE = "aiops.evidence"
     REPAIR = "aiops.repair"
@@ -221,7 +220,7 @@ class KafkaConsumerWorker:
 
 
 def topic_for(settings: Any, event_type: AIOpsEventType) -> str:
-    names = {AIOpsEventType.ALERT: "kafka_topic_alerts", AIOpsEventType.INCIDENT: "kafka_topic_incidents",
+    names = {AIOpsEventType.INCIDENT: "kafka_topic_incidents",
              AIOpsEventType.EVIDENCE: "kafka_topic_evidence", AIOpsEventType.REPAIR: "kafka_topic_repair",
              AIOpsEventType.REVIEW: "kafka_topic_review", AIOpsEventType.APPROVAL: "kafka_topic_approval",
              AIOpsEventType.AUDIT: "kafka_topic_audit", AIOpsEventType.DEAD_LETTER: "kafka_topic_dlq"}

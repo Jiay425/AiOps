@@ -51,24 +51,29 @@
 
 ```mermaid
 flowchart LR
-    A[Alert / Issue] --> B[FastAPI / Kafka]
-    B --> C[CodeOpsGraph]
-    C --> D[Diagnosis Agent]
-    D --> E[OpsEvidenceSubgraph]
-    E --> F[3-Sigma · EWMA · Rules · Isolation Forest]
-    D --> G[GraphRcaSubgraph]
-    G --> H[Neo4j topology · change · trace]
-    C --> I[Repair Agent]
-    I --> J[Repository investigation]
-    J --> K[PatchSandbox]
-    K --> L[Maven compile / test]
-    L --> M[Review Agent]
-    M -->|high confidence + gates passed| N[auto_approve_patch]
-    M -->|low confidence / high risk| O[interrupt / resume]
-    N --> P[apply_approved_patch]
-    O --> P
-    C -. checkpoint .-> Q[(SQLite / PostgreSQL)]
-    C -. event / artifact / metric .-> R[(MySQL / Kafka)]
+    A[Alertmanager Webhook] --> B[MySQL Alert Event]
+    B --> C[Redis 指纹去重]
+    C --> D[Redis Incident 聚合]
+    D --> E[MySQL Incident + Outbox]
+    E --> F[Kafka Incident Consumer]
+    F --> G[IncidentScheduler]
+    G --> H[CodeOpsGraph]
+    H --> I[Diagnosis Agent]
+    I --> J[OpsEvidenceSubgraph]
+    J --> K[3-Sigma · EWMA · Rules · Isolation Forest]
+    K --> L[GraphRcaSubgraph]
+    L --> M[Neo4j topology · change · trace]
+    H --> N[Repair Agent]
+    N --> O[Repository investigation]
+    O --> P[PatchSandbox]
+    P --> Q[Maven compile / test]
+    Q --> R[Review Agent]
+    R -->|high confidence + gates passed| S[auto_approve_patch]
+    R -->|low confidence / high risk| T[interrupt / resume]
+    S --> U[apply_approved_patch]
+    T --> U
+    H -. checkpoint .-> V[(SQLite / PostgreSQL)]
+    H -. event / artifact / metric .-> W[(MySQL / Kafka)]
 ```
 
 ## 已真实跑通的端到端 Case
@@ -219,16 +224,22 @@ NOT_CONFIGURED 或 UNAVAILABLE，不会编造拓扑。
 ### Kafka、Outbox 与 DLQ
 
 ~~~text
-Alert webhook
-  → MySQL: Alert + Dispatch + Outbox（同一事务）
-  → Kafka: aiops.alerts.v1 / aiops.events.v1
-  → idempotent consumer
-  → CodeOpsGraph
-  → failure → aiops.dlq.v1
+Alertmanager Webhook
+  → 逐条写 MySQL alert_events
+  → Redis SET NX EX 600：fingerprint 去重
+  → 重复：更新 last_seen / duplicate_count，停止
+  → 新告警：按 environment + service + alertname + endpoint 聚合 Incident
+  → Redis HSET：alertCount、lastSeen、最高严重级别、fingerprint / instance 集合
+  → 第一次：MySQL incidents（COLLECTING），等待 30–60 秒
+  → 窗口结束：MySQL incidents（READY）+ Outbox（同一事务）
+  → Kafka: aiops.incidents.v1 → 幂等 Consumer → IncidentScheduler → 单次 CodeOpsGraph
+  → 消费失败 → aiops.dlq.v1
 ~~~
 
-- Outbox 只有收到 Kafka 成功确认后才迁移为 PUBLISHED。
-- 每个事件包含版本和 idempotencyKey，重复投递不会重复启动修复。
+- 每一条 Alertmanager 投递都会先留存；相同 fingerprint 在 10 分钟内只增加重复计数，绝不重复建任务。
+- Incident Key 不包含 instance 或 fingerprint：同一环境、服务、告警名、接口的多个实例告警会在一个窗口内合并为一次修复。
+- 只有 Incident 聚合窗口结束才写 Outbox；Outbox 收到 Kafka 成功确认后才迁移为 PUBLISHED。
+- 每个 Incident 事件包含版本和 idempotencyKey，重复投递不会重复启动修复。
 - 无法解析或超过预算的消息带原始 envelope 与错误分类进入 DLQ。
 
 ## 安全模型

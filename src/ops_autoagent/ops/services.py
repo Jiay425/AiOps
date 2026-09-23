@@ -774,42 +774,6 @@ class AlertNormalizer:
                 return None
 
 
-class AlertDeduplicator:
-    def __init__(self, store: Store, window_minutes: int = 5):
-        self.store = store
-        self.window = timedelta(minutes=window_minutes)
-
-    async def accept(self, alert: dict[str, Any]) -> dict[str, Any]:
-        now = datetime.now()
-        dedup_key = "|".join(str(alert.get(key) or "").strip() for key in (
-            "serviceName", "alertName", "fingerprint", "severity")).lower()
-        reason = ""
-        if not str(alert.get("serviceName") or "").strip() or str(alert.get("serviceName")).lower() == "unknown-service":
-            reason = "serviceName is missing"
-        elif str(alert.get("status") or "").lower() != "firing":
-            reason = "alert status is not firing"
-        else:
-            running = await self.store.find("dispatches", lambda item: item.get("serviceName") == alert.get("serviceName")
-                                            and item.get("dispatchStatus") in {"NEW", "RUNNING"}, 500)
-            if running:
-                reason = "service already has running diagnosis"
-            else:
-                recent = await self.store.find("dispatches", lambda item: item.get("dedupKey") == dedup_key, 500)
-                latest = max(recent, key=lambda item: item.get("createTime", ""), default=None)
-                if latest and self._within(latest.get("createTime"), now):
-                    reason = f"duplicated alert within {max(1, int(self.window.total_seconds() / 60))} minutes"
-        return {"accepted": not reason, "reason": reason, "dedupKey": dedup_key, "alert": alert}
-
-    def _within(self, value: str | None, now: datetime) -> bool:
-        try:
-            parsed = datetime.fromisoformat(value or "")
-            if parsed.tzinfo:
-                parsed = parsed.astimezone().replace(tzinfo=None)
-            return now - parsed <= self.window
-        except ValueError:
-            return False
-
-
 class ServiceOwnerService:
     def __init__(self, store: Store):
         self.store = store
