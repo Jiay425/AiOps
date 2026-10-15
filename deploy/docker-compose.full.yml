@@ -6,7 +6,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in deploy/.env.full.local}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-ops_autoagent}
-    ports: ["13306:3306"]
+    ports: ["127.0.0.1:13306:3306"]
     volumes: ["mysql-data:/var/lib/mysql"]
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
@@ -20,7 +20,7 @@ services:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in deploy/.env.full.local}
       NEO4J_server_memory_heap_initial__size: 512m
       NEO4J_server_memory_heap_max__size: 512m
-    ports: ["7474:7474", "7687:7687"]
+    ports: ["127.0.0.1:7474:7474", "127.0.0.1:7687:7687"]
     volumes:
       - neo4j-data:/data
     healthcheck:
@@ -45,7 +45,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-    ports: ["9092:29092"]
+    ports: ["127.0.0.1:9092:29092"]
     healthcheck:
       test: ["CMD-SHELL", "kafka-topics --bootstrap-server kafka:9092 --list >/dev/null 2>&1"]
       interval: 10s
@@ -54,7 +54,7 @@ services:
 
   redis:
     image: redis:6.2
-    ports: ["16379:6379"]
+    ports: ["127.0.0.1:16379:6379"]
     volumes: ["redis-data:/data"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -64,17 +64,17 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.54.1
-    ports: ["9090:9090"]
+    ports: ["127.0.0.1:9090:9090"]
     volumes:
-      - ../docs/dev-ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus.local.yml:/etc/prometheus/prometheus.yml:ro
       - ../docs/dev-ops/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
-    ports: ["9093:9093"]
-    volumes: ["../docs/dev-ops/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro"]
+    ports: ["127.0.0.1:9093:9093"]
+    volumes: ["./alertmanager.local.yml:/etc/alertmanager/alertmanager.yml:ro"]
     command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
 
   elasticsearch:
@@ -83,13 +83,21 @@ services:
       discovery.type: single-node
       ES_JAVA_OPTS: -Xms512m -Xmx512m
       xpack.security.enabled: "false"
-    ports: ["9200:9200"]
+    ports: ["127.0.0.1:9200:9200"]
     volumes: ["elasticsearch-data:/usr/share/elasticsearch/data"]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null"]
       interval: 10s
       timeout: 10s
       retries: 30
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:7.17.28
+    volumes:
+      - ./logstash.local.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - ../data/log:/app/log:ro
+    depends_on:
+      elasticsearch: {condition: service_healthy}
 
   skywalking-oap:
     image: apache/skywalking-oap-server:9.7.0
@@ -103,14 +111,14 @@ services:
       # `receiver-zipkin missing`).
       SW_OTEL_RECEIVER_ENABLED_HANDLERS: otlp-traces,otlp-metrics,otlp-logs
       SW_RECEIVER_ZIPKIN: default
-    ports: ["11800:11800", "12800:12800"]
+    ports: ["127.0.0.1:11800:11800", "127.0.0.1:12800:12800"]
     depends_on:
       elasticsearch: {condition: service_healthy}
 
   skywalking-ui:
     image: apache/skywalking-ui:9.7.0
     environment: {SW_OAP_ADDRESS: http://skywalking-oap:12800}
-    ports: ["18080:8080"]
+    ports: ["127.0.0.1:18080:8080"]
     depends_on: [skywalking-oap]
 
   grafana:
@@ -118,7 +126,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in deploy/.env.full.local}
-    ports: ["4000:3000"]
+    ports: ["127.0.0.1:4000:3000"]
     volumes: ["../docs/dev-ops/grafana/provisioning:/etc/grafana/provisioning:ro"]
     depends_on: [prometheus]
 
@@ -135,6 +143,11 @@ services:
       KAFKA_ENABLED: "true"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       REDIS_URL: redis://redis:6379/0
+      OPS_INCIDENT_AGGREGATION_INTERVAL_SECONDS: "60"
+      OPS_FIXTURE_FALLBACK: "false"
+      OPS_DEMO_AUTO_SEED_ENABLED: "false"
+      OPS_SERVICE_REPOSITORIES_JSON: '{"order-service":"samples/order-service"}'
+      OPS_REPOSITORY_ROOT: /app
       PROMETHEUS_BASE_URL: http://prometheus:9090
       ELK_BASE_URL: http://elasticsearch:9200
       SKYWALKING_GRAPHQL_URL: http://skywalking-oap:12800/graphql
@@ -148,11 +161,11 @@ services:
       OPENAI_MODEL: "${OPENAI_MODEL:-deepseek-flash}"
       CODEOPS_LLM_FLASH_MODEL: "${CODEOPS_LLM_FLASH_MODEL:-deepseek-flash}"
       CODEOPS_TEST_EXECUTION_ENABLED: "true"
-      CODEOPS_APPLY_MODE: apply_to_worktree
-      CODEOPS_AUTO_APPLY_ENABLED: "true"
+      CODEOPS_APPLY_MODE: delivery_only
+      CODEOPS_AUTO_APPLY_ENABLED: "false"
       CODEOPS_AUTO_APPLY_MIN_CONFIDENCE: HIGH
       CODEOPS_TEST_EXECUTION_TIMEOUT_MS: "300000"
-    ports: ["8099:8099"]
+    ports: ["127.0.0.1:8099:8099"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8099/actuator/health', timeout=3)"]
       interval: 10s
@@ -163,6 +176,7 @@ services:
       neo4j: {condition: service_healthy}
       kafka: {condition: service_healthy}
       redis: {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
 
 volumes:
   mysql-data:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -130,6 +132,299 @@ class Store:
 
     async def find(self, table: str, predicate, limit: int = 500) -> list[dict[str, Any]]:
         return [item for item in await self.recent(table, limit) if predicate(item)]
+
+    async def pending_outbox_events(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Filter before limiting, so old pending messages cannot be hidden."""
+        limit = max(1, min(int(limit), 10000))
+        if self._pool:
+            async with self._pool.acquire() as connection, connection.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT payload FROM outbox_events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload,'$.status'))='PENDING' "
+                    f"ORDER BY updated_at ASC, id ASC LIMIT {limit}")
+                rows = await cursor.fetchall()
+        else:
+            async with aiosqlite.connect(self.path) as db:
+                cursor = await db.execute(
+                    "SELECT payload FROM outbox_events WHERE json_extract(payload,'$.status')='PENDING' "
+                    "ORDER BY updated_at ASC, id ASC LIMIT ?", (limit,))
+                rows = await cursor.fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    async def accept_alert(self, fingerprint_id: str, alert: dict[str, Any], dedup_seconds: int) -> tuple[bool, str]:
+        """Persist one accepted alert and its dedup receipt in one transaction.
+
+        Redis filters the normal duplicate path. This durable receipt handles
+        lease expiry, Redis restarts, and a crash after SQL commit but before
+        confirming the Redis claim.
+        """
+        if self._pool:
+            async with self._pool.acquire() as connection, connection.cursor() as cursor:
+                await connection.begin()
+                try:
+                    result = await self._accept_alert(cursor, True, fingerprint_id, alert, dedup_seconds)
+                    await connection.commit()
+                    return result
+                except BaseException:
+                    await connection.rollback()
+                    raise
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.cursor()
+            try:
+                result = await self._accept_alert(cursor, False, fingerprint_id, alert, dedup_seconds)
+                await db.commit()
+                return result
+            except BaseException:
+                await db.rollback()
+                raise
+
+    @staticmethod
+    async def _accept_alert(cursor: Any, mysql: bool, fingerprint_id: str, alert: dict[str, Any],
+                            dedup_seconds: int) -> tuple[bool, str]:
+        marker = "%s" if mysql else "?"
+        values = ",".join([marker] * 3)
+        insert = "INSERT IGNORE" if mysql else "INSERT OR IGNORE"
+        now = datetime.now(timezone.utc)
+        timestamp = now.isoformat()
+        # Acquire the per-fingerprint row lock before checking its last accept.
+        await cursor.execute(f"{insert} INTO alert_fingerprints(id,payload,updated_at) VALUES({values})",
+                             (fingerprint_id, "{}", timestamp))
+        await cursor.execute(f"SELECT payload FROM alert_fingerprints WHERE id={marker}"
+                             + (" FOR UPDATE" if mysql else ""), (fingerprint_id,))
+        row = await cursor.fetchone()
+        receipt = json.loads(row[0]) if row else {}
+        previous = receipt.get("acceptedAt") or receipt.get("firstSeen")
+        if previous:
+            try:
+                accepted = datetime.fromisoformat(str(previous).replace("Z", "+00:00")).astimezone(timezone.utc)
+                if now - accepted < timedelta(seconds=dedup_seconds):
+                    return False, str(receipt.get("alertId") or "legacy")
+            except ValueError:
+                pass
+        receipt.update(fingerprintKey=fingerprint_id, alertId=alert["alertId"], acceptedAt=timestamp,
+                       firstSeen=receipt.get("firstSeen") or timestamp, lastSeen=timestamp, updateTime=timestamp,
+                       acceptedCount=int(receipt.get("acceptedCount", 0)) + 1,
+                       duplicateCount=int(receipt.get("duplicateCount", 0)))
+        await cursor.execute(f"INSERT INTO alert_events(id,payload,updated_at) VALUES({values})",
+                             (alert["alertId"], json.dumps(alert, ensure_ascii=False), alert["updateTime"]))
+        await cursor.execute(f"UPDATE alert_fingerprints SET payload={marker},updated_at={marker} WHERE id={marker}",
+                             (json.dumps(receipt, ensure_ascii=False), timestamp, fingerprint_id))
+        return True, str(alert["alertId"])
+
+    async def commit_alert_batch(self, incident: dict[str, Any], outbox: dict[str, Any],
+                                 alerts: list[dict[str, Any]]) -> bool:
+        """Claim exactly the scanned IDs and commit Incident/Outbox together.
+
+        Conditional updates remain authoritative even if the Redis lease
+        expires or two coordinators have different snapshots.
+        """
+        if self._pool:
+            async with self._pool.acquire() as connection, connection.cursor() as cursor:
+                await connection.begin()
+                try:
+                    committed = await self._commit_alert_batch(cursor, True, incident, outbox, alerts)
+                    if committed:
+                        await connection.commit()
+                    else:
+                        await connection.rollback()
+                    return committed
+                except BaseException:
+                    await connection.rollback()
+                    raise
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.cursor()
+            try:
+                committed = await self._commit_alert_batch(cursor, False, incident, outbox, alerts)
+                if committed:
+                    await db.commit()
+                else:
+                    await db.rollback()
+                return committed
+            except BaseException:
+                await db.rollback()
+                raise
+
+    @staticmethod
+    async def _commit_alert_batch(cursor: Any, mysql: bool, incident: dict[str, Any], outbox: dict[str, Any],
+                                  alerts: list[dict[str, Any]]) -> bool:
+        if not alerts:
+            return False
+        marker = "%s" if mysql else "?"
+        status = ("JSON_UNQUOTE(JSON_EXTRACT(payload,'$.ingressStatus'))" if mysql
+                  else "json_extract(payload,'$.ingressStatus')")
+        for alert in sorted(alerts, key=lambda item: item["alertId"]):
+            await cursor.execute(
+                f"UPDATE alert_events SET payload={marker},updated_at={marker} WHERE id={marker} "
+                f"AND {status}='PENDING_AGGREGATION'",
+                (json.dumps(alert, ensure_ascii=False), alert["updateTime"], alert["alertId"]))
+            if cursor.rowcount != 1:
+                return False
+        values = ",".join([marker] * 3)
+        for table, key, record in (("incidents", incident["incidentId"], incident),
+                                   ("outbox_events", outbox["outboxId"], outbox)):
+            await cursor.execute(f"INSERT INTO {table}(id,payload,updated_at) VALUES({values})",
+                                 (key, json.dumps(record, ensure_ascii=False), record["updateTime"]))
+        return True
+
+    async def pending_alert_events(self, limit: int | None = 10000, incident_key: str | None = None) -> list[dict[str, Any]]:
+        """Read oldest buffered alerts, independent of newer duplicate deliveries."""
+        safe_limit = max(1, min(int(limit), 10000)) if limit is not None else None
+        if self._pool:
+            async with self._pool.acquire() as connection, connection.cursor() as cursor:
+                query = "SELECT payload FROM alert_events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.ingressStatus')) = %s"
+                params: list[Any] = ["PENDING_AGGREGATION"]
+                if incident_key is not None:
+                    query += " AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.incidentKey')) = %s"
+                    params.append(incident_key)
+                query += " ORDER BY updated_at ASC"
+                if safe_limit is not None:
+                    query += f" LIMIT {safe_limit}"
+                await cursor.execute(query, tuple(params))
+                rows = await cursor.fetchall()
+        else:
+            async with aiosqlite.connect(self.path) as db:
+                query = "SELECT payload FROM alert_events WHERE json_extract(payload, '$.ingressStatus') = ?"
+                params = ["PENDING_AGGREGATION"]
+                if incident_key is not None:
+                    query += " AND json_extract(payload, '$.incidentKey') = ?"
+                    params.append(incident_key)
+                query += " ORDER BY updated_at ASC"
+                if safe_limit is not None:
+                    query += " LIMIT ?"
+                    params.append(safe_limit)
+                cursor = await db.execute(query, tuple(params))
+                rows = await cursor.fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    async def claim_processed_event(self, key: str, event_id: str, lease_seconds: int = 60) -> tuple[str, str | None]:
+        """Atomically claim one consumer delivery; expired RECEIVED claims may be reclaimed."""
+        now = datetime.now(timezone.utc)
+        received_at = now.isoformat()
+        lease_until = (now + timedelta(seconds=lease_seconds)).isoformat()
+        owner = str(uuid.uuid4())
+        record = {"idempotencyKey": key, "eventId": event_id, "status": "RECEIVED",
+                  "owner": owner, "receivedAt": received_at, "leaseUntil": lease_until}
+        serialized = json.dumps(record, ensure_ascii=False)
+        if self._pool:
+            async with self._pool.acquire() as connection, connection.cursor() as cursor:
+                await cursor.execute("INSERT IGNORE INTO processed_events(id,payload,updated_at) VALUES(%s,%s,%s)",
+                                     (key, serialized, received_at))
+                if cursor.rowcount == 1:
+                    return "CLAIMED", owner
+        else:
+            async with aiosqlite.connect(self.path) as db:
+                cursor = await db.execute("INSERT OR IGNORE INTO processed_events(id,payload,updated_at) VALUES(?,?,?)",
+                                          (key, serialized, received_at))
+                await db.commit()
+                if cursor.rowcount == 1:
+                    return "CLAIMED", owner
+        existing = await self.get("processed_events", key)
+        if existing and existing.get("status") in {None, "QUEUED"}:
+            return "QUEUED", None
+        if not existing or str(existing.get("leaseUntil") or "") > received_at:
+            return "BUSY", None
+        previous_owner = str(existing.get("owner") or "")
+        if self._pool:
+            async with self._pool.acquire() as connection, connection.cursor() as cursor:
+                await cursor.execute(
+                    "UPDATE processed_events SET payload=%s,updated_at=%s WHERE id=%s "
+                    "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.status'))='RECEIVED' "
+                    "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.owner'))=%s "
+                    "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.leaseUntil'))<=%s",
+                    (serialized, received_at, key, previous_owner, received_at))
+                claimed = cursor.rowcount == 1
+        else:
+            async with aiosqlite.connect(self.path) as db:
+                cursor = await db.execute(
+                    "UPDATE processed_events SET payload=?,updated_at=? WHERE id=? "
+                    "AND json_extract(payload,'$.status')='RECEIVED' "
+                    "AND json_extract(payload,'$.owner')=? "
+                    "AND json_extract(payload,'$.leaseUntil')<=?",
+                    (serialized, received_at, key, previous_owner, received_at))
+                await db.commit()
+                claimed = cursor.rowcount == 1
+        return ("CLAIMED", owner) if claimed else ("BUSY", None)
+
+    async def complete_incident_handoff(self, key: str, owner: str, incident: dict[str, Any]) -> None:
+        """Move the receipt and its durable Incident queue record together."""
+        updated = str(incident["updateTime"])
+        receipt = {"idempotencyKey": key, "eventId": f"evt-incident-ready:{incident['incidentId']}",
+                   "status": "QUEUED", "owner": owner, "queuedAt": updated}
+        receipt_json = json.dumps(receipt, ensure_ascii=False)
+        incident_json = json.dumps(incident, ensure_ascii=False, default=str)
+        if self._pool:
+            async with self._pool.acquire() as connection, connection.cursor() as cursor:
+                await connection.begin()
+                try:
+                    await cursor.execute(
+                        "UPDATE processed_events SET payload=%s,updated_at=%s WHERE id=%s "
+                        "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.status'))='RECEIVED' "
+                        "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.owner'))=%s",
+                        (receipt_json, updated, key, owner))
+                    if cursor.rowcount != 1:
+                        raise RuntimeError("Incident receipt ownership was lost")
+                    await cursor.execute(
+                        "INSERT INTO incidents(id,payload,updated_at) VALUES(%s,%s,%s) "
+                        "ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_at=VALUES(updated_at)",
+                        (incident["incidentId"], incident_json, updated))
+                    await connection.commit()
+                except Exception:
+                    await connection.rollback()
+                    raise
+        else:
+            async with aiosqlite.connect(self.path) as db:
+                try:
+                    cursor = await db.execute(
+                        "UPDATE processed_events SET payload=?,updated_at=? WHERE id=? "
+                        "AND json_extract(payload,'$.status')='RECEIVED' "
+                        "AND json_extract(payload,'$.owner')=?", (receipt_json, updated, key, owner))
+                    if cursor.rowcount != 1:
+                        raise RuntimeError("Incident receipt ownership was lost")
+                    await db.execute(
+                        "INSERT INTO incidents(id,payload,updated_at) VALUES(?,?,?) "
+                        "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",
+                        (incident["incidentId"], incident_json, updated))
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    raise
+
+    async def queued_incidents(self, limit: int | None = None) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(limit, 10000)) if limit is not None else None
+        if self._pool:
+            async with self._pool.acquire() as connection, connection.cursor() as cursor:
+                query = ("SELECT payload FROM incidents WHERE JSON_UNQUOTE(JSON_EXTRACT(payload,'$.status'))='QUEUED' "
+                         "ORDER BY updated_at ASC")
+                await cursor.execute(query + (f" LIMIT {safe_limit}" if safe_limit is not None else ""))
+                rows = await cursor.fetchall()
+        else:
+            async with aiosqlite.connect(self.path) as db:
+                query = ("SELECT payload FROM incidents WHERE json_extract(payload,'$.status')='QUEUED' "
+                         "ORDER BY updated_at ASC")
+                params = (safe_limit,) if safe_limit is not None else ()
+                cursor = await db.execute(query + (" LIMIT ?" if safe_limit is not None else ""), params)
+                rows = await cursor.fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    async def claim_queued_incident(self, incident: dict[str, Any]) -> bool:
+        """Only one scheduler worker may start a queued Incident."""
+        key = str(incident["incidentId"])
+        updated = str(incident["updateTime"])
+        payload = json.dumps(incident, ensure_ascii=False, default=str)
+        if self._pool:
+            async with self._pool.acquire() as connection, connection.cursor() as cursor:
+                await cursor.execute(
+                    "UPDATE incidents SET payload=%s,updated_at=%s WHERE id=%s "
+                    "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.status'))='QUEUED'",
+                    (payload, updated, key))
+                return cursor.rowcount == 1
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                "UPDATE incidents SET payload=?,updated_at=? WHERE id=? "
+                "AND json_extract(payload,'$.status')='QUEUED'", (payload, updated, key))
+            await db.commit()
+            return cursor.rowcount == 1
 
     async def close(self) -> None:
         if self._pool:

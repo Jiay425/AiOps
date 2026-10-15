@@ -214,7 +214,7 @@ class ObservabilityTools:
 
     async def prometheus(self, service: str, start: str, end: str, fixture_case_id: str = "",
                          endpoint: str = "", problem: str = "") -> dict[str, Any]:
-        if fixture_case_id and self.settings.ops_fixture_fallback:
+        if fixture_case_id and self._fixture_enabled():
             fixture = self._fixture_or_error(
                 service, "prometheus.json", RuntimeError("explicit evaluation fixture"), fixture_case_id)
             if fixture.get("available"):
@@ -461,7 +461,7 @@ class ObservabilityTools:
                                    "fixtureFallback": True}}
 
     async def elk(self, service: str, start: str, end: str, problem: str, fixture_case_id: str = "") -> dict[str, Any]:
-        if fixture_case_id and self.settings.ops_fixture_fallback:
+        if fixture_case_id and self._fixture_enabled():
             fixture = self._fixture_or_error(service, "es-logs.json", RuntimeError("explicit evaluation fixture"),
                                               fixture_case_id)
             if fixture.get("available"):
@@ -560,7 +560,7 @@ class ObservabilityTools:
 
     async def skywalking(self, service: str, trace_id: str | None, start: str, end: str,
                          fixture_case_id: str = "", endpoint: str = "", problem: str = "") -> dict[str, Any]:
-        if fixture_case_id and self.settings.ops_fixture_fallback:
+        if fixture_case_id and self._fixture_enabled():
             fixture = self._fixture_or_error(service, "skywalking-trace.json",
                                               RuntimeError("explicit evaluation fixture"), fixture_case_id)
             if fixture.get("available"):
@@ -748,8 +748,12 @@ class ObservabilityTools:
         scored.sort(key=lambda item: (-item[0], item[1].name))
         return [{"name": p.stem, "score": score, "content": text[:5000]} for score, p, text in scored[:limit]]
 
+    def _fixture_enabled(self) -> bool:
+        return (self.settings.ops_fixture_fallback
+                and self.settings.ops_runtime_mode.strip().lower() != "production")
+
     def _fixture_or_error(self, service: str, filename: str, exc: Exception, fixture_case_id: str = "") -> dict[str, Any]:
-        if self.settings.ops_fixture_fallback:
+        if self._fixture_enabled():
             candidates: list[Path] = []
             if fixture_case_id and Path("fixtures/incident").exists():
                 for directory in Path("fixtures/incident").iterdir():

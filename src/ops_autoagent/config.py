@@ -228,6 +228,11 @@ class Settings(BaseSettings):
     ops_anomaly_isolation_forest_contamination: float = 0.10
     ops_anomaly_ensemble_min_votes: int = 2
     ops_runtime_mode: str = "demo"
+    ops_service_repositories_json: str = "{}"
+    ops_repository_root: Path = Path(".")
+    # Prefer the periodic interval; retain the legacy window setting below as
+    # a configuration fallback for existing deployments.
+    ops_incident_aggregation_interval_seconds: int | None = Field(default=None, ge=1)
     ops_topology_enabled: bool = True
     neo4j_uri: str = ""
     neo4j_username: str = "neo4j"
@@ -252,6 +257,7 @@ class Settings(BaseSettings):
     kafka_outbox_max_attempts: int = 8
     kafka_consumer_enabled: bool = True
     kafka_consumer_poll_timeout_ms: int = 500
+    kafka_consumer_max_attempts: int = 3
     kafka_consumer_max_batch_size: int = 50
     kafka_topic_auto_provision: bool = True
     kafka_topic_partitions: int = 1

@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ from ops_autoagent.api import (_bounded_evaluation_text, _evaluation_terminal_su
                                api_guard_counters, app, settings, store)
 from ops_autoagent.config import get_settings
 from ops_autoagent.eventing import AIOpsEventType, EventEnvelope
+from ops_autoagent.outbox import OutboxRelay
+from ops_autoagent.codeops.services import IncidentScheduler
 from ops_autoagent.graphs.codeops import CodeOpsGraph
 from ops_autoagent.codeops.eval_cases import (BUSINESS_EVAL_LEVEL, BASELINE_CASE_SOURCE,
                                               EXPANDED_BUSINESS_CASE_IDS, EXPANSION_CASE_SOURCE,
@@ -21,6 +24,8 @@ from ops_autoagent.codeops.evaluation import build_report
 async def isolated_database(tmp_path: Path):
     store.path = tmp_path / "api.db"
     await store.initialize()
+    api_module.incident_aggregator._memory_dedup.clear()
+    api_module.incident_aggregator._memory_reservations.clear()
 
 
 @pytest.mark.asyncio
@@ -420,10 +425,11 @@ async def test_alertmanager_empty_payload_and_message_match_legacy_contract():
     assert empty.json() == {"code": "0002", "info": "alert webhook payload cannot be empty", "data": None}
     assert accepted.json()["data"] == {"totalAlerts": 1, "acceptedCount": 0, "skippedCount": 1,
                                         "message": "alerts persisted; accepted alerts are aggregating"}
+    assert await store.recent("alert_events", 10) == []
 
 
 @pytest.mark.asyncio
-async def test_accepted_alert_is_persisted_and_aggregated_before_outbox():
+async def test_accepted_alert_waits_before_incident_and_outbox():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/api/v1/ops/alert/webhook/alertmanager", json={"alerts": [{
             "status": "firing", "fingerprint": "aggregation-only-1",
@@ -432,20 +438,29 @@ async def test_accepted_alert_is_persisted_and_aggregated_before_outbox():
         }]})
     assert response.json()["data"]["acceptedCount"] == 1
     incidents = await store.recent("incidents", 10)
-    assert len(incidents) == 1 and incidents[0]["status"] == "COLLECTING"
-    assert incidents[0]["alertCount"] == 1
-    assert len(await store.recent("alert_events", 10)) == 1
+    assert incidents == []
+    events = await store.recent("alert_events", 10)
+    assert len(events) == 1 and events[0]["ingressStatus"] == "PENDING_AGGREGATION"
     assert await store.recent("outbox_events", 10) == []
     assert await store.recent("dispatches", 10) == []
 
 
 @pytest.mark.asyncio
-async def test_duplicate_alert_updates_audit_without_creating_a_second_incident():
+async def test_duplicate_alert_is_filtered_before_database_writes(monkeypatch):
     payload = {"alerts": [{
         "status": "firing", "fingerprint": "duplicate-window-1",
         "labels": {"alertname": "OrderErrorRate", "service": "orders", "severity": "critical"},
         "annotations": {"summary": "order failures exceed threshold"},
     }]}
+    writes = 0
+    accept_alert = store.accept_alert
+
+    async def counted(*args):
+        nonlocal writes
+        writes += 1
+        return await accept_alert(*args)
+
+    monkeypatch.setattr(store, "accept_alert", counted)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         first = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload)
         duplicate = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload)
@@ -453,9 +468,92 @@ async def test_duplicate_alert_updates_audit_without_creating_a_second_incident(
     assert duplicate.json()["data"]["skippedCount"] == 1
     events = await store.recent("alert_events", 10)
     fingerprints = await store.recent("alert_fingerprints", 10)
-    assert len(await store.recent("incidents", 10)) == 1
-    assert any(event["ingressStatus"] == "DUPLICATE" for event in events)
-    assert fingerprints[0]["duplicateCount"] == 1
+    assert await store.recent("incidents", 10) == []
+    assert len(events) == 1 and events[0]["ingressStatus"] == "PENDING_AGGREGATION"
+    assert fingerprints[0]["acceptedCount"] == 1
+    assert writes == 1
+
+
+@pytest.mark.asyncio
+async def test_alertmanager_deduplicates_per_instance_then_groups_across_instances():
+    def payload(instance: str, fingerprint: str, severity: str) -> dict:
+        return {"alerts": [{"status": "firing", "fingerprint": fingerprint,
+                             "labels": {"alertname": "OrderErrorRate", "service": "orders",
+                                        "environment": "staging", "endpoint": "/orders/submit",
+                                        "instance": instance, "severity": severity},
+                             "annotations": {"summary": "order failures exceed threshold"}}]}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload("order-1", "same", "warning"))
+        repeat = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload("order-1", "changed", "warning"))
+        second = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload("order-2", "same", "critical"))
+    assert [item.json()["data"]["acceptedCount"] for item in (first, repeat, second)] == [1, 0, 1]
+    assert await store.recent("incidents", 10) == []
+    pending = await store.pending_alert_events()
+    assert len(pending) == 2
+    await api_module.incident_aggregator.publish_due_incidents()
+    incidents = await store.recent("incidents", 10)
+    assert len(incidents) == 1
+    assert incidents[0]["status"] == "READY" and incidents[0]["alertCount"] == 2
+    assert incidents[0]["instances"] == ["order-1", "order-2"]
+    assert incidents[0]["severity"] == "P1"
+    assert len(await store.recent("outbox_events", 10)) == 1
+
+
+@pytest.mark.asyncio
+async def test_alert_persistence_failure_releases_claim_for_redelivery(monkeypatch):
+    payload = {"alerts": [{"status": "firing", "fingerprint": "retry-on-write-failure",
+                          "labels": {"alertname": "WriteRetry", "service": "orders", "instance": "order-1"}}]}
+    original = store.accept_alert
+    calls = 0
+
+    async def flaky(*args):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("temporary database failure")
+        return await original(*args)
+
+    monkeypatch.setattr(store, "accept_alert", flaky)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload)).status_code == 500
+        retry = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload)
+    assert retry.json()["data"]["acceptedCount"] == 1
+    assert len(await store.pending_alert_events()) == 1
+
+
+@pytest.mark.asyncio
+async def test_uncommitted_ingress_claim_returns_retryable_error_without_writes():
+    payload = {"alerts": [{"status": "firing", "fingerprint": "busy-ingress",
+                          "labels": {"alertname": "Busy", "service": "orders", "instance": "order-1"}}]}
+    from ops_autoagent.schemas import AlertmanagerWebhook
+    alert = api_module.alert_normalizer.normalize(AlertmanagerWebhook.model_validate(payload))[0]
+    assert await api_module.incident_aggregator.reserve_fingerprint(alert) == "CLAIMED"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload)
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert await store.recent("alert_events", 10) == []
+
+
+@pytest.mark.asyncio
+async def test_redis_confirmation_failure_does_not_lose_or_duplicate_accepted_alert(monkeypatch):
+    payload = {"alerts": [{"status": "firing", "fingerprint": "redis-confirm-failure",
+                          "labels": {"alertname": "Confirmation", "service": "orders", "instance": "order-1"}}]}
+
+    async def unavailable(*args):
+        raise RuntimeError("Redis temporarily unavailable")
+
+    monkeypatch.setattr(api_module.incident_aggregator, "confirm_fingerprint", unavailable)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload)
+        assert first.json()["data"]["acceptedCount"] == 1
+        # Model the pending lease expiring or Redis restarting after SQL commit.
+        api_module.incident_aggregator._memory_reservations.clear()
+        retry = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload)
+    assert retry.json()["data"]["skippedCount"] == 1
+    assert len(await store.pending_alert_events()) == 1
 
 
 @pytest.mark.asyncio
@@ -474,3 +572,81 @@ async def test_kafka_incident_consumer_persists_queue_state_before_scheduler_han
     persisted = await store.get("incidents", "incident-consumer-1")
     assert persisted["status"] == "QUEUED"
     assert received[0]["scheduledBy"] == "KafkaIncidentConsumer"
+    receipt = await store.get("processed_events", envelope.idempotency_key)
+    assert receipt["status"] == "QUEUED"
+
+
+@pytest.mark.asyncio
+async def test_queued_incident_recovers_after_scheduler_handoff_interruption(monkeypatch):
+    seen: list[str] = []
+
+    class FailingScheduler:
+        async def enqueue(self, incident):
+            raise RuntimeError("scheduler interrupted after database commit")
+
+    class RecoveredScheduler:
+        async def enqueue(self, incident):
+            seen.append(incident["incidentId"])
+
+    envelope = EventEnvelope(eventType=AIOpsEventType.INCIDENT, incidentId="incident-recovery-1",
+                             idempotencyKey="incident-ready:incident-recovery-1",
+                             payload={"incident": {"incidentId": "incident-recovery-1", "status": "READY"}})
+    monkeypatch.setattr(api_module, "incident_scheduler", FailingScheduler())
+    with pytest.raises(RuntimeError, match="scheduler interrupted"):
+        await api_module._consume_incident_event(envelope)
+    assert (await store.get("processed_events", envelope.idempotency_key))["status"] == "QUEUED"
+    assert (await store.get("incidents", "incident-recovery-1"))["status"] == "QUEUED"
+
+    monkeypatch.setattr(api_module, "incident_scheduler", RecoveredScheduler())
+    recovery = asyncio.create_task(api_module._reconcile_queued_incidents())
+    try:
+        await asyncio.wait_for(asyncio.sleep(0.05), timeout=1)
+    finally:
+        recovery.cancel()
+        await asyncio.gather(recovery, return_exceptions=True)
+    assert "incident-recovery-1" in seen
+
+
+@pytest.mark.asyncio
+async def test_alert_to_outbox_to_consumer_queue_without_external_kafka(monkeypatch, tmp_path: Path):
+    sent: list[EventEnvelope] = []
+
+    class Publisher:
+        async def publish(self, topic, envelope):
+            assert topic == settings.kafka_topic_incidents
+            sent.append(envelope)
+
+    async def unused_handler(incident):
+        raise AssertionError("Scheduler must not execute the graph in this test")
+
+    scheduler = IncidentScheduler(unused_handler, queue_file=tmp_path / "incident-queue.json")
+    monkeypatch.setattr(api_module, "incident_scheduler", scheduler)
+    payload = {"alerts": [
+        {"status": "firing", "fingerprint": f"full-chain-{instance}",
+         "labels": {"alertname": "FullChainErrorRate", "service": "full-chain-order-service",
+                    "environment": "staging", "endpoint": "/orders", "instance": instance,
+                    "severity": "critical"},
+         "annotations": {"summary": "order failures"}}
+        for instance in ("order-1", "order-2")
+    ]}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/v1/ops/alert/webhook/alertmanager", json=payload)
+    assert response.json()["data"]["acceptedCount"] == 2
+    assert await store.recent("incidents", 10) == []
+    assert await store.recent("outbox_events", 10) == []
+
+    await api_module.incident_aggregator.publish_due_incidents()
+    incident = (await store.recent("incidents", 10))[0]
+    outbox = (await store.recent("outbox_events", 10))[0]
+    assert incident["alertCount"] == 2 and incident["status"] == "READY"
+    assert outbox["status"] == "PENDING"
+
+    await OutboxRelay(store, Publisher(), settings)._deliver(outbox)
+    assert (await store.get("outbox_events", outbox["outboxId"]))["status"] == "PUBLISHED"
+    assert len(sent) == 1
+    await api_module._record_consumed_kafka_event(sent[0])
+    assert (await store.get("incidents", incident["incidentId"]))["status"] == "QUEUED"
+    assert (await store.get("processed_events", sent[0].idempotency_key))["status"] == "QUEUED"
+    assert scheduler.queue.qsize() == 1
+    await api_module._record_consumed_kafka_event(sent[0])
+    assert scheduler.queue.qsize() == 1

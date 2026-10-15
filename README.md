@@ -119,6 +119,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8099/api/v1/codeops/evaluation/r
 
 完整命令、预期输出和边界说明见 [Demo 指南](docs/demo.md)。
 
+本机还可以用样例 Java 服务的真实请求流量触发 Prometheus 规则，再经 Alertmanager Webhook 自动创建 Python/LangGraph CodeOps 任务；它与上述业务 Eval 分开，默认只交付补丁、不自动写目标仓库。启动和验证方式见 [本地真实告警驱动验证](docs/local-live-alert-chain.md)。
+
 ## 为什么不是“调一下 LLM”的 Demo
 
 | 能力 | 实现 | 价值 |
@@ -225,20 +227,24 @@ NOT_CONFIGURED 或 UNAVAILABLE，不会编造拓扑。
 
 ~~~text
 Alertmanager Webhook
-  → 逐条写 MySQL alert_events
-  → Redis SET NX EX 600：fingerprint 去重
-  → 重复：更新 last_seen / duplicate_count，停止
-  → 新告警：按 environment + service + alertname + endpoint 聚合 Incident
-  → Redis HSET：alertCount、lastSeen、最高严重级别、fingerprint / instance 集合
-  → 第一次：MySQL incidents（COLLECTING），等待 30–60 秒
-  → 窗口结束：MySQL incidents（READY）+ Outbox（同一事务）
-  → Kafka: aiops.incidents.v1 → 幂等 Consumer → IncidentScheduler → 单次 CodeOpsGraph
+  → Redis 按环境 + 实例 + 服务 + 告警名 + 接口去重
+  → 重复：结束，不逐条写数据库
+  → 新告警：MySQL alert_events（PENDING_AGGREGATION）+ 去重完成记录（同事务）
+  → 后台每 60 秒扫描一批待聚合记录，按环境 + 服务 + 告警名 + 接口跨实例分组
+  → MySQL incidents（READY）+ alert_events（AGGREGATED）+ Outbox（同一事务）
+  → Kafka: aiops.incidents.v1 → Consumer 原子领取（processed_events: RECEIVED）
+  → 同事务写 Incident（QUEUED）+ processed_events（QUEUED）
+  → IncidentScheduler 从数据库恢复 QUEUED 待办 → CodeOpsGraph
   → 消费失败 → aiops.dlq.v1
 ~~~
 
-- 每一条 Alertmanager 投递都会先留存；相同 fingerprint 在 10 分钟内只增加重复计数，绝不重复建任务。
-- Incident Key 不包含 instance 或 fingerprint：同一环境、服务、告警名、接口的多个实例告警会在一个窗口内合并为一次修复。
-- 只有 Incident 聚合窗口结束才写 Outbox；Outbox 收到 Kafka 成功确认后才迁移为 PUBLISHED。
+- 只保存去重后的有效 firing 告警；重复投递和 resolved 通知不逐条保存。缺少实例标签时用 Alertmanager fingerprint 兜底。
+- 入口先领取 30 秒短租约，入库成功后确认默认 10 分钟去重；未完成的领取返回可重试的 HTTP 503。数据库去重完成记录防止 Redis 状态丢失、租约过期后重复入库。
+- Incident Key 不包含 instance 或 fingerprint：同一环境、服务、告警名、接口的多个实例告警在同轮扫描中合成一场事故。无需每组单独等满 60 秒；本轮查询后新入库的记录留给下一轮。
+- `OPS_INCIDENT_AGGREGATION_INTERVAL_SECONDS=60` 控制定时周期；旧 `OPS_INCIDENT_AGGREGATION_WINDOW_SECONDS` 配置作为后备兼容。单轮最多扫描 10000 条，积压记录后续轮次继续处理。
+- 每组通过数据库条件更新领取本轮记录，Incident、Outbox、已聚合状态同事务提交；即使聚合锁过期，也不会重复提交同一批记录。
+- Outbox 在数据库中先筛 PENDING 再按最旧记录取批次，发送确认后改为 PUBLISHED；扫描或状态更新失败会保留待发记录并继续重试。
+- `outbox_events` 只记录发送状态；`processed_events` 用唯一消息编号领取，超时的 RECEIVED 可重新领取，QUEUED 与 Incident 排队状态同事务提交。Kafka offset 在排队交接完成后才提交。
 - 每个 Incident 事件包含版本和 idempotencyKey，重复投递不会重复启动修复。
 - 无法解析或超过预算的消息带原始 envelope 与错误分类进入 DLQ。
 

@@ -1,5 +1,7 @@
 # Real Alertmanager Incident-to-Fix Verification
 
+> 历史接口说明：此页保留旧 Webhook payload 范例，不代表当前自动化验收方式。当前本机真实告警链路的启动、流量注入和验收，请使用 [本地真实告警驱动验证](../local-live-alert-chain.md)。`/incident-to-fix/verify` 现与普通 Webhook 一样进入去重、定时聚合链路，HTTP 返回接收计数；应从事故/任务查询接口找到对应记录并查询终态。下文“同步提交”和“产品视图返回”描述已过时。
+
 ## Why This Exists
 
 Interviewers may challenge whether Incident-to-Fix can handle real online incidents if it has not been connected to production. The correct proof is not a fixture demo. The proof is an Alertmanager-compatible webhook payload entering the same alert normalization, live evidence mode, CodeOps task creation, tool gateway audit, product trace, and safety governance path.

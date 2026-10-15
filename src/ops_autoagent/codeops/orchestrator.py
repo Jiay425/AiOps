@@ -149,6 +149,12 @@ class IncidentFixOrchestratorPolicy:
             return False
         if str(strategy_type or "").upper() == "NEED_MORE_EVIDENCE":
             return False
+        if context.get("autonomousTriage") is True:
+            localization = memory.get("codeLocalization") or {}
+            return bool(IncidentFixOrchestratorPolicy.REPO in executed
+                        and localization.get("targetFiles")
+                        and strategy.get("shouldEnterCodeRepair") is True
+                        and str(strategy_type or "").upper() == "CODE_FIX")
         explicitly_authorized = (context.get("allowPatchApply") is True or
                                  context.get("allowTestPatchApply") is True or
                                  {str(item).lower() for item in focus} & {"bug_fix", "test_verification"})

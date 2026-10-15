@@ -8,7 +8,7 @@ import smtplib
 import statistics
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from email.message import EmailMessage
 from typing import Any
 

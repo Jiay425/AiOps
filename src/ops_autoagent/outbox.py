@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Awaitable, Callable
 
 from .eventing import AIOpsEventType, EventEnvelope, KafkaPublisher, serialize_envelope, topic_for
 from .schemas import now_iso
 from .store import Store
+
+
+logger = logging.getLogger(__name__)
 
 
 class OutboxRelay:
@@ -37,8 +41,15 @@ class OutboxRelay:
         interval = max(50, int(getattr(self.settings, "kafka_outbox_poll_interval_ms", 500) or 500)) / 1000
         batch = max(1, int(getattr(self.settings, "kafka_outbox_batch_size", 50) or 50))
         while not self._stopped.is_set():
-            for record in await self.store.find("outbox_events", lambda item: item.get("status") == "PENDING", batch):
-                await self._deliver(record)
+            try:
+                records = await self.store.pending_outbox_events(batch)
+                for record in records:
+                    try:
+                        await self._deliver(record)
+                    except Exception as exc:
+                        logger.warning("Outbox record update failed (%s); retrying later", type(exc).__name__)
+            except Exception as exc:
+                logger.warning("Outbox scan failed (%s); retrying later", type(exc).__name__)
             try:
                 await asyncio.wait_for(self._stopped.wait(), timeout=interval)
             except asyncio.TimeoutError:

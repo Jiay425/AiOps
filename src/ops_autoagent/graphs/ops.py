@@ -16,7 +16,7 @@ from ..ops import (EvidenceReviewer, EvidenceSignalExtractor, HistoricalMemorySe
 from ..schemas import IncidentAnalyzeRequest, now_iso
 from ..store import Store
 from ..tools import ObservabilityTools
-from .state_models import EventList, ToolTraceList, task_event
+from .state_models import EventList, ToolTraceList
 from .subgraphs import OpsEvidenceSubgraph
 
 

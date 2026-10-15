@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 import uuid
@@ -33,9 +34,11 @@ from .store import Store
 from .observability import redact
 from .persistence import CheckpointerManager
 from .executors import CallerRunsBoundedExecutor
-from .eventing import AIOpsEventType, EventEnvelope, KafkaConsumerWorker, KafkaPublisher
+from .eventing import AIOpsEventType, EventEnvelope, IncidentReceiptInProgress, KafkaConsumerWorker, KafkaPublisher
 from .outbox import OutboxRelay
 from .incident_aggregation import IncidentAggregationCoordinator
+from .incident_routing import (IncidentRepositoryUnmapped, build_scheduled_incident_request,
+                               resolve_incident_repository)
 from .tools import ObservabilityTools
 from .topology import Neo4jTopologyService, TopologyUnavailable
 from .runbook_actions import RunbookActionRequest, RunbookActionService
@@ -109,9 +112,18 @@ async def _consume_incident_event(envelope: EventEnvelope) -> None:
         raise ValueError("Kafka incident event requires an incident object with incidentId")
     if incident_scheduler is None:
         raise RuntimeError("IncidentScheduler is not running")
+    claim, owner = await store.claim_processed_event(envelope.idempotency_key, envelope.event_id)
+    if claim == "BUSY":
+        raise IncidentReceiptInProgress(envelope.idempotency_key)
+    if claim == "QUEUED":
+        persisted = await store.get("incidents", str(incident["incidentId"]))
+        if persisted and persisted.get("status") == "QUEUED":
+            await incident_scheduler.enqueue(persisted)
+        return
+    assert owner is not None
     queued = {**incident, "status": "QUEUED", "scheduledBy": "KafkaIncidentConsumer",
               "queuedAt": now_iso(), "updateTime": now_iso()}
-    await store.put("incidents", str(queued["incidentId"]), queued, queued["updateTime"])
+    await store.complete_incident_handoff(envelope.idempotency_key, owner, queued)
     await incident_scheduler.enqueue(queued)
 
 
@@ -144,6 +156,9 @@ async def lifespan(_: FastAPI):
         queue_file=settings.ops_database_path.parent / "incident-queue" / "queue.json",
     )
     await incident_scheduler.start()
+    queue_recovery = asyncio.create_task(_reconcile_queued_incidents(), name="incident-queue-recovery")
+    background_jobs.add(queue_recovery)
+    queue_recovery.add_done_callback(background_jobs.discard)
     if settings.ops_demo_auto_seed_enabled:
         seed_job = asyncio.create_task(OpsDemoDataAutoSeeder(settings).seed())
         background_jobs.add(seed_job)
@@ -433,69 +448,36 @@ async def alertmanager(body: AlertmanagerWebhook) -> ApiResponse:
     alerts = alert_normalizer.normalize(body)
     accepted, skipped = 0, len(body.alerts) - len(alerts)
     for alert in alerts:
-        created = now_iso()
-        raw = {**alert, "ingressStatus": "RECEIVED", "duplicate": False,
-               "createTime": created, "updateTime": created}
-        # Persist every webhook event before Redis.  A duplicate is still an
-        # auditable Alertmanager delivery, it is simply not a new task trigger.
-        await store.put("alert_events", alert["alertId"], redact(raw), created)
         if str(alert.get("status") or "").lower() != "firing":
             skipped += 1
-            raw.update(ingressStatus="IGNORED", ignoreReason="alert status is not firing", updateTime=now_iso())
-            await store.put("alert_events", alert["alertId"], redact(raw), raw["updateTime"])
             continue
-        fingerprint_id = "fingerprint-" + incident_aggregator.fingerprint_key(alert).rsplit(":", 1)[-1]
-        if not await incident_aggregator.claim_fingerprint(alert):
+        claim = await incident_aggregator.reserve_fingerprint(alert)
+        if claim == "DUPLICATE":
             skipped += 1
-            raw.update(ingressStatus="DUPLICATE", duplicate=True,
-                       duplicateReason=f"fingerprint seen within {settings.ops_alert_dedup_window_minutes} minutes",
-                       updateTime=now_iso())
-            fingerprint = await store.get("alert_fingerprints", fingerprint_id) or {
-                "fingerprintKey": fingerprint_id, "firstSeen": created, "duplicateCount": 0}
-            fingerprint.update(lastSeen=raw["updateTime"],
-                               duplicateCount=int(fingerprint.get("duplicateCount", 0)) + 1,
-                               updateTime=raw["updateTime"])
-            await store.put_many([
-                ("alert_events", alert["alertId"], redact(raw), raw["updateTime"]),
-                ("alert_fingerprints", fingerprint_id, fingerprint, raw["updateTime"]),
-            ])
             continue
-
+        if claim == "BUSY":
+            # A concurrent request may still fail before SQL commit. Ask the
+            # sender to retry instead of acknowledging an unpersisted alert.
+            raise HTTPException(status_code=503, detail="Alert persistence is in progress; retry delivery",
+                                headers={"Retry-After": "1"})
+        created = now_iso()
+        raw = {**alert, "ingressStatus": "PENDING_AGGREGATION", "duplicate": False,
+               "incidentKey": incident_aggregator.incident_key(alert), "createTime": created, "updateTime": created}
+        fingerprint_id = "fingerprint-" + incident_aggregator.fingerprint_key(alert).rsplit(":", 1)[-1]
         try:
-            aggregate = await incident_aggregator.aggregate(alert, f"incident-{uuid.uuid4()}")
-            persisted = await store.get("incidents", aggregate["incidentId"])
-            labels = alert.get("labels") if isinstance(alert.get("labels"), dict) else {}
-            annotations = alert.get("annotations") if isinstance(alert.get("annotations"), dict) else {}
-            repository = (labels.get("repository") or labels.get("repo") or labels.get("code_repository")
-                          or annotations.get("repository") or annotations.get("repo")
-                          or annotations.get("code_repository") or "")
-            # An already-ready/queued/running incident is the same incident
-            # within its correlation window. Keep its audit aggregate current,
-            # but never reopen it or create another Incident-to-Fix task.
-            existing_status = str((persisted or {}).get("status") or "")
-            can_schedule = not persisted or existing_status == "COLLECTING"
-            incident = {**(persisted or {}), **{key: value for key, value in aggregate.items() if key != "isNew"},
-                        "incidentId": aggregate["incidentId"], "serviceName": alert["serviceName"],
-                        "alertName": alert["alertName"], "environment": labels.get("environment") or labels.get("env")
-                        or labels.get("namespace") or "default", "repository": repository,
-                        "status": "COLLECTING" if can_schedule else existing_status, "source": "alertmanager",
-                        "createTime": (persisted or {}).get("createTime", created), "updateTime": now_iso()}
-            fingerprint = await store.get("alert_fingerprints", fingerprint_id) or {
-                "fingerprintKey": fingerprint_id, "firstSeen": created, "acceptedCount": 0, "duplicateCount": 0}
-            fingerprint.update(lastSeen=incident["updateTime"],
-                               acceptedCount=int(fingerprint.get("acceptedCount", 0)) + 1,
-                               incidentId=incident["incidentId"], updateTime=incident["updateTime"])
-            raw.update(ingressStatus="AGGREGATED" if can_schedule else "AGGREGATED_EXISTING", incidentId=incident["incidentId"],
-                       incidentKey=aggregate["incidentKey"], updateTime=incident["updateTime"])
-            await store.put_many([
-                ("alert_events", alert["alertId"], redact(raw), raw["updateTime"]),
-                ("alert_fingerprints", fingerprint_id, fingerprint, raw["updateTime"]),
-                ("incidents", incident["incidentId"], incident, incident["updateTime"]),
-            ])
-            accepted += 1
+            persisted, accepted_id = await store.accept_alert(
+                fingerprint_id, redact(raw), incident_aggregator._dedup_seconds())
         except Exception:
-            await incident_aggregator.release_fingerprint(alert)
+            await incident_aggregator.release_fingerprint(alert, "pending:" + str(alert["alertId"]))
             raise
+        try:
+            await incident_aggregator.confirm_fingerprint(alert, accepted_id)
+        except Exception as exc:
+            # SQL is already durable. Its per-fingerprint receipt prevents
+            # duplicate inserts after the short Redis lease expires.
+            logging.getLogger(__name__).warning("Alert dedup confirmation failed (%s)", type(exc).__name__)
+        accepted += int(persisted)
+        skipped += int(not persisted)
     return ok({"totalAlerts": len(body.alerts), "acceptedCount": accepted,
                "skippedCount": skipped, "message": "alerts persisted; accepted alerts are aggregating"})
 
@@ -792,7 +774,7 @@ def _incident_fix_view(task: dict[str, Any]) -> dict[str, Any]:
                              "failed" if str(task.get("status", "")).upper() == "FAILED" else "completed")
     finished = sum(stage["status"].upper() in {"SUCCESS", "SKIPPED"} for stage in stages)
     progress = 100 if str(task.get("status", "")).upper() == "COMPLETED" else min(99, round(finished * 100 / len(stages)))
-    incident_keys = ("source", "eventId", "opsDiagnosisId", "serviceName", "alertRule", "severity",
+    incident_keys = ("source", "eventId", "incidentId", "incidentKey", "alertName", "opsDiagnosisId", "serviceName", "alertRule", "severity",
                      "traceId", "startTime", "endTime", "evidenceMode", "fixtureFallbackAllowed")
     incident = {key: context[key] for key in incident_keys if context.get(key) is not None}
     guardrails = context.get("guardrailSummary") if isinstance(context.get("guardrailSummary"), dict) else {}
@@ -2113,28 +2095,36 @@ def _load_eval_cases(case_id: str | None) -> list[dict[str, Any]]:
 
 
 async def _dispatch_scheduled_incident(incident: dict[str, Any]) -> None:
-    endpoints = incident.get("affectedEndpoints") if isinstance(incident.get("affectedEndpoints"), list) else []
-    endpoint_suffix = f" Affected endpoints: {', '.join(str(item) for item in endpoints)}" if endpoints else ""
-    service = incident.get("service") or incident.get("serviceName") or "unknown-service"
     incident_id = str(incident.get("incidentId") or "")
+    if incident_id:
+        persisted = await store.get("incidents", incident_id)
+        if persisted and persisted.get("taskId"):
+            return
+        # A worker may stop after the graph persisted its task but before it
+        # linked that task back to the Incident. Recover the link on replay.
+        existing = await store.find(
+            "tasks", lambda task: isinstance(task.get("context"), dict)
+            and task["context"].get("incidentId") == incident_id, 1)
+        if existing:
+            task = existing[0]
+            recovered = {**(persisted or incident), "taskId": task["taskId"],
+                         "status": str(task.get("status") or "RECONCILIATION_REQUIRED"),
+                         "updateTime": now_iso()}
+            await store.put("incidents", incident_id, recovered, recovered["updateTime"])
+            return
+    try:
+        repository = resolve_incident_repository(incident, settings)
+    except IncidentRepositoryUnmapped as exc:
+        if incident_id:
+            blocked = {**incident, "status": "REPOSITORY_UNMAPPED", "blockedReason": str(exc),
+                       "updateTime": now_iso()}
+            await store.put("incidents", incident_id, blocked, blocked["updateTime"])
+        return
     running = {**incident, "status": "RUNNING", "startedAt": now_iso(), "updateTime": now_iso()}
     if incident_id:
-        await store.put("incidents", incident_id, running, running["updateTime"])
-    request = CodeOpsTaskRequest(
-        taskType="INCIDENT_TO_FIX",
-        goal=(f"{service} {incident.get('alertName', 'unknown')} "
-              f"severity={incident.get('severity', 'UNKNOWN')}. Aggregated from {incident.get('alertCount', 0)} "
-              f"alerts. {incident.get('summary', '')}{endpoint_suffix}"),
-        repository=incident.get("repository") or "samples/order-service",
-        focusAreas=["incident", "code_location", "bug_fix", "test_verification", "release_risk"],
-        context={"serviceName": service,
-                 "severity": incident.get("severity", "UNKNOWN"), "alertCount": incident.get("alertCount", 0),
-                 "alertName": incident.get("alertName", "unknown"), "affectedEndpoints": endpoints,
-                 "scheduledBy": "IncidentScheduler", "incidentId": incident.get("incidentId"),
-                 "incidentKey": incident.get("incidentKey"), "fingerprints": incident.get("fingerprints", []),
-                 "instances": incident.get("instances", []), "evidenceMode": "LIVE",
-                 "fixtureFallbackAllowed": False, "allowPatchApply": True, "allowTestPatchApply": True},
-        maxRounds=8, maxToolCalls=50)
+        if not await store.claim_queued_incident(running):
+            return
+    request = build_scheduled_incident_request(incident, repository)
     try:
         state = await codeops_graph.invoke(request)
         task = state["task"]
@@ -2149,6 +2139,18 @@ async def _dispatch_scheduled_incident(incident: dict[str, Any]) -> None:
                       "updateTime": now_iso()}
             await store.put("incidents", incident_id, failed, failed["updateTime"])
         raise
+
+
+async def _reconcile_queued_incidents() -> None:
+    """Re-enqueue committed Incident rows after a consumer or process restart."""
+    while True:
+        try:
+            if incident_scheduler is not None:
+                for incident in await store.queued_incidents():
+                    await incident_scheduler.enqueue(incident)
+        except Exception:
+            logging.getLogger(__name__).exception("Unable to reconcile queued incidents; retrying")
+        await asyncio.sleep(1)
 
 
 async def _notify_diagnosis(alert: dict[str, Any], diagnosis: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:

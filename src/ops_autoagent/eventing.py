@@ -16,6 +16,10 @@ from pydantic import BaseModel, ConfigDict, Field
 logger = logging.getLogger(__name__)
 
 
+class IncidentReceiptInProgress(RuntimeError):
+    """A delivery is claimed elsewhere; do not acknowledge its Kafka offset."""
+
+
 class AIOpsEventType(StrEnum):
     INCIDENT = "aiops.incident"
     EVIDENCE = "aiops.evidence"
@@ -187,6 +191,8 @@ class KafkaConsumerWorker:
 
     async def _run(self) -> None:
         timeout = max(50, int(getattr(self.settings, "kafka_consumer_poll_timeout_ms", 500) or 500)) / 1000
+        max_attempts = max(1, int(getattr(self.settings, "kafka_consumer_max_attempts", 3) or 3))
+        failures: dict[tuple[str, int, int], int] = {}
         while not self._stopped.is_set():
             message = await asyncio.to_thread(self._consumer.poll, timeout) if self._consumer else None
             if message is None:
@@ -194,19 +200,35 @@ class KafkaConsumerWorker:
             if message.error():
                 logger.warning("Kafka consumer error: %s", message.error())
                 continue
+            position = (message.topic(), message.partition(), message.offset())
             try:
                 envelope = EventEnvelope.model_validate_json(message.value())
                 await self._process(envelope)
                 await asyncio.to_thread(self._consumer.commit, message=message, asynchronous=False)
+                failures.pop(position, None)
+            except IncidentReceiptInProgress:
+                await self._retry_message(message)
             except Exception as exc:
-                await self._dead_letter(message, exc)
-                await asyncio.to_thread(self._consumer.commit, message=message, asynchronous=False)
+                failures[position] = failures.get(position, 0) + 1
+                if failures[position] >= max_attempts and await self._dead_letter(message, exc):
+                    await asyncio.to_thread(self._consumer.commit, message=message, asynchronous=False)
+                    failures.pop(position, None)
+                else:
+                    await self._retry_message(message)
+
+    async def _retry_message(self, message: Any) -> None:
+        await asyncio.sleep(1)
+        from confluent_kafka import TopicPartition
+        self._consumer.seek(TopicPartition(message.topic(), message.partition(), message.offset()))
 
     async def _process(self, envelope: EventEnvelope) -> bool:
+        if envelope.event_type == AIOpsEventType.INCIDENT:
+            await self.handler(envelope)
+            return True
         from .outbox import consume_once
         return await consume_once(self.store, envelope, self.handler)
 
-    async def _dead_letter(self, message: Any, exc: Exception) -> None:
+    async def _dead_letter(self, message: Any, exc: Exception) -> bool:
         raw = message.value().decode("utf-8", errors="replace") if message is not None and message.value() else ""
         envelope = EventEnvelope(
             eventType=AIOpsEventType.DEAD_LETTER, idempotencyKey=f"dlq:{message.topic()}:{message.partition()}:{message.offset()}",
@@ -215,8 +237,10 @@ class KafkaConsumerWorker:
         )
         try:
             await self.publisher.publish(topic_for(self.settings, AIOpsEventType.DEAD_LETTER), envelope)
+            return True
         except Exception:
             logger.exception("Unable to publish Kafka DLQ event")
+            return False
 
 
 def topic_for(settings: Any, event_type: AIOpsEventType) -> str:

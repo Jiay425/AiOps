@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -327,6 +328,8 @@ class CodeOpsGraph:
                    "diagnosisId": context.get("opsDiagnosisId") or f"codeops-diagnosis-{uuid.uuid4()}"}
         fixture = self._fixture_case_id(context)
         declared_fixture = context.get("fixtureEvidence") if isinstance(context.get("fixtureEvidence"), dict) else {}
+        if str(context.get("evidenceMode") or "").upper() == "LIVE" and (declared_fixture or fixture):
+            raise ValueError("LIVE_EVIDENCE_FIXTURE_FORBIDDEN")
         # Eval telemetry is a case-scoped, explicitly labelled fixture.  It is
         # authoritative for the eval request; falling through to the legacy
         # fixture registry would silently mix incidents and invalidate scoring.
@@ -341,11 +344,13 @@ class CodeOpsGraph:
             traces = {"source": "SkyWalking", "available": True, "sourceMode": "FIXTURE_FALLBACK", "fixtureFallback": True,
                       "spans": [str(traces_raw.get("signal") or traces_raw)]}
         elif self.observability:
-            metrics = await self.observability.prometheus(
-                service, start, end, fixture, command["endpoint"], command["problem"])
-            logs = await self.observability.elk(service, start, end, command["problem"], fixture)
-            traces = await self.observability.skywalking(
-                service, command["traceId"], start, end, fixture, command["endpoint"], command["problem"])
+            metrics, logs, traces = await asyncio.gather(
+                self.observability.prometheus(
+                    service, start, end, fixture, command["endpoint"], command["problem"]),
+                self.observability.elk(service, start, end, command["problem"], fixture),
+                self.observability.skywalking(
+                    service, command["traceId"], start, end, fixture, command["endpoint"], command["problem"]),
+            )
         else:
             metrics = {"source": "Prometheus", "available": False, "summary": "Prometheus unavailable"}
             logs = {"source": "Elasticsearch", "available": False, "summary": "Elasticsearch unavailable"}
@@ -1081,6 +1086,8 @@ class CodeOpsGraph:
     @staticmethod
     def _repair_override_allowed(state: dict[str, Any], localization: dict[str, Any], focus: set[str]) -> bool:
         context = state.get("context", {}) if isinstance(state.get("context"), dict) else {}
+        if context.get("autonomousTriage") is True:
+            return False
         executed = set(state.get("executed_skills", []))
         executed.update(step.get("selectedSkill") for step in state.get("steps", [])
                         if step.get("selectedSkill"))

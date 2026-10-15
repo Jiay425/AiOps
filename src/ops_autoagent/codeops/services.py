@@ -461,7 +461,8 @@ class BackgroundTaskService:
 
 
 class IncidentScheduler:
-    PRIORITY = {"CRITICAL": 0, "HIGH": 30, "WARNING": 60, "MEDIUM": 60}
+    PRIORITY = {"CRITICAL": 0, "P1": 0, "HIGH": 30, "P2": 30,
+                "WARNING": 60, "MEDIUM": 60, "P3": 60, "LOW": 90}
 
     SEVERITY_SCORE = {"CRITICAL": 100, "P1": 100, "HIGH": 70, "P2": 70, "WARNING": 40,
                       "MEDIUM": 40, "P3": 40, "LOW": 10}
@@ -482,6 +483,10 @@ class IncidentScheduler:
         self.active_incidents: dict[str, dict[str, Any]] = {}
         self.total_enqueued = 0
         self.total_dispatched = 0
+        self._queued_incident_ids: set[str] = set()
+        self._running_incidents: dict[str, dict[str, Any]] = {}
+        self._deferred_by_service: dict[str, list[tuple[int, int, dict[str, Any]]]] = {}
+        self._restored = False
 
     async def ingest(self, fingerprint: str, alert_name: str, service: str, severity: str,
                      summary: str, endpoint: str = "", **metadata: Any) -> dict[str, Any] | None:
@@ -509,18 +514,47 @@ class IncidentScheduler:
         return None
 
     async def enqueue(self, incident: dict[str, Any]) -> None:
+        incident_id = str(incident.get("incidentId") or "")
+        if incident_id and incident_id in self._queued_incident_ids:
+            return
         self.sequence += 1
         incident = {**incident, "status": "QUEUED", "enqueuedAt": int(time.time() * 1000)}
-        priority = self.PRIORITY.get(str(incident.get("severity", "LOW")).upper(), 90)
+        priority = self._priority(incident)
         await self.queue.put((priority, self.sequence, incident))
+        if incident_id:
+            self._queued_incident_ids.add(incident_id)
         self.total_enqueued += 1
         self._persist()
 
     async def start(self) -> None:
         if self.running:
             return
+        if not self._restored and self.queue.empty():
+            await self._restore()
+        self._restored = True
         self.running = True
         self.workers = [asyncio.create_task(self._worker()) for _ in range(self.max_concurrent)]
+
+    async def _restore(self) -> None:
+        try:
+            saved = json.loads(self.queue_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(saved, dict):
+            return
+        self.total_enqueued = max(self.total_enqueued, int(saved.get("totalEnqueued", 0) or 0))
+        self.total_dispatched = max(self.total_dispatched, int(saved.get("totalDispatched", 0) or 0))
+        for item in saved.get("queue", []):
+            if not isinstance(item, dict):
+                continue
+            incident_id = str(item.get("incidentId") or "")
+            if incident_id and incident_id in self._queued_incident_ids:
+                continue
+            self.sequence += 1
+            priority = self._priority(item)
+            await self.queue.put((priority, self.sequence, item))
+            if incident_id:
+                self._queued_incident_ids.add(incident_id)
 
     async def stop(self) -> None:
         self.running = False
@@ -528,31 +562,61 @@ class IncidentScheduler:
             worker.cancel()
         await asyncio.gather(*self.workers, return_exceptions=True)
         self.workers.clear()
+        for incident in list(self._running_incidents.values()):
+            self.sequence += 1
+            priority = self._priority(incident)
+            await self.queue.put((priority, self.sequence, incident))
+        self._running_incidents.clear()
+        for waiting in self._deferred_by_service.values():
+            for item in waiting:
+                self.queue.put_nowait(item)
+        self._deferred_by_service.clear()
+        self._persist()
 
     async def _worker(self) -> None:
         while self.running:
             priority, sequence, incident = await self.queue.get()
             service = incident.get("serviceName", "unknown-service")
             if self.active_by_service.get(service, 0) >= self.max_per_service:
-                await self.queue.put((priority + 1, sequence, incident))
+                # A busy service must not monopolize idle workers or lose its
+                # original severity while waiting for its service slot.
+                self._deferred_by_service.setdefault(service, []).append((priority, sequence, incident))
                 self.queue.task_done()
-                await asyncio.sleep(0.05)
+                self._persist()
                 continue
             self.active_by_service[service] = self.active_by_service.get(service, 0) + 1
+            incident_id = str(incident.get("incidentId") or "")
+            if incident_id:
+                self._running_incidents[incident_id] = incident
+            self._persist()
+            cancelled = False
             try:
                 await self.handler(incident)
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
             finally:
                 self.active_by_service[service] -= 1
-                self.total_dispatched += 1
-                group_key = incident.get("groupKey")
-                if group_key:
-                    self.active_incidents.pop(group_key, None)
+                if self.active_by_service[service] < self.max_per_service:
+                    for waiting in self._deferred_by_service.pop(service, []):
+                        self.queue.put_nowait(waiting)
+                if not cancelled:
+                    self.total_dispatched += 1
+                    if incident_id:
+                        self._queued_incident_ids.discard(incident_id)
+                        self._running_incidents.pop(incident_id, None)
+                    group_key = incident.get("groupKey")
+                    if group_key:
+                        self.active_incidents.pop(group_key, None)
                 self.queue.task_done()
                 self._persist()
 
     def status(self) -> dict[str, Any]:
-        raw_queued = [dict(item[2]) for item in sorted(list(self.queue._queue))[:50]]
-        queued = [{"groupKey": item.get("groupKey"), "service": item.get("service"),
+        pending = list(self.queue._queue)
+        pending.extend(item for items in self._deferred_by_service.values() for item in items)
+        raw_queued = [dict(item[2]) for item in sorted(pending)[:50]]
+        queued = [{"groupKey": item.get("groupKey"),
+                   "service": item.get("serviceName") or item.get("service"),
                    "severity": item.get("severity"), "alertCount": item.get("alertCount"),
                    "status": item.get("status", "QUEUED"), "enqueuedAt": item.get("enqueuedAt")}
                   for item in raw_queued]
@@ -567,7 +631,7 @@ class IncidentScheduler:
                 "maxConcurrent": self.max_concurrent, "maxPerService": self.max_per_service,
                 "availableSlots": max(0, self.max_concurrent - sum(self.active_by_service.values())),
                 "activeIncidents": len(self.active_incidents), "activeIncidentItems": active,
-                "queueStats": {"queueSize": self.queue.qsize(), "totalEnqueued": self.total_enqueued,
+                "queueStats": {"queueSize": len(pending), "totalEnqueued": self.total_enqueued,
                                "totalDispatched": self.total_dispatched,
                                "top3": [{key: item.get(key) for key in
                                          ("groupKey", "service", "severity", "alertCount", "status")}
@@ -577,11 +641,20 @@ class IncidentScheduler:
         cutoff = time.time() - self.dedup_window_seconds * 2
         self.seen_fingerprints = {key: value for key, value in self.seen_fingerprints.items() if value >= cutoff}
 
+    @classmethod
+    def _priority(cls, incident: dict[str, Any]) -> int:
+        severity = str(incident.get("highestSeverity") or incident.get("severity") or "LOW").upper()
+        return cls.PRIORITY.get(severity, 90)
+
     def _persist(self) -> None:
         try:
             self.queue_file.parent.mkdir(parents=True, exist_ok=True)
+            queued = [dict(item[2]) for item in list(self.queue._queue)]
+            queued.extend(dict(item[2]) for items in self._deferred_by_service.values() for item in items)
+            # A dequeued incident remains recoverable until its handler ends.
+            queued.extend(dict(item) for item in self._running_incidents.values())
             state = {"totalEnqueued": self.total_enqueued, "totalDispatched": self.total_dispatched,
-                     "queue": [dict(item[2]) for item in list(self.queue._queue)]}
+                     "queue": queued}
             temporary = self.queue_file.with_suffix(self.queue_file.suffix + ".tmp")
             temporary.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
             temporary.replace(self.queue_file)
